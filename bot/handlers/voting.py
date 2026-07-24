@@ -52,10 +52,19 @@ async def handle_vote_toggle(
         poll = await repo.get_poll(session, option.poll_id)
 
         counts = {opt.id: await repo.get_vote_count(session, opt.id) for opt in poll_options}
+        voter_mentions_by_option = {
+            opt.id: [
+                formatting.voter_mention(v.username, v.first_name)
+                for v in await repo.get_voters(session, opt.id)
+            ]
+            for opt in poll_options
+        }
         option_text = option.text
 
     lines = [
-        formatting.format_option_line(i + 1, opt.text, opt.date, counts[opt.id])
+        formatting.format_option_line(
+            i + 1, opt.text, opt.date, counts[opt.id], voter_mentions_by_option[opt.id]
+        )
         for i, opt in enumerate(poll_options)
     ]
     text = formatting.poll_message_text(poll.title, lines)

@@ -200,3 +200,39 @@ async def test_handle_vote_toggle_survives_message_refresh_failure(tmp_path, ses
 
     assert scheduler.get_job(threshold_job_id(option.id)) is not None
     callback.answer.assert_awaited_once_with("Голос учтён!")
+
+
+async def test_handle_vote_toggle_message_shows_voter_names(tmp_path, session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session,
+            chat_id=100,
+            title="Игра",
+            options=[("24.07", dt.date(2026, 7, 24)), ("25.07", dt.date(2026, 7, 25))],
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+        options = await repo.get_poll_options(session, poll.id)
+        voted_option, other_option = options
+
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
+    fake_bot = AsyncMock()
+    callback = FakeCallback(
+        data=f"vote:{voted_option.id}", user=FakeUser(id=10, username="alice", first_name="Alice")
+    )
+
+    await handle_vote_toggle(
+        callback,
+        session_maker=session_maker,
+        scheduler=scheduler,
+        bot=fake_bot,
+        admin_mention="@admin",
+        threshold_check_callback=_noop_threshold_callback,
+    )
+
+    sent_text = fake_bot.edit_message_text.await_args.kwargs["text"]
+    assert sent_text == (
+        "📅 Игра\n\n"
+        "1. 24.07 (24 июля) — 1 🗳\n"
+        "   @alice\n"
+        "2. 25.07 (25 июля) — 0 🗳"
+    )
