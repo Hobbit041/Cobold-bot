@@ -55,3 +55,42 @@ async def get_poll_options(session: AsyncSession, poll_id: int) -> list[Option]:
 
 async def get_poll(session: AsyncSession, poll_id: int) -> Poll | None:
     return await session.get(Poll, poll_id)
+
+
+# --- Voting ----------------------------------------------------------------
+
+
+async def toggle_vote(
+    session: AsyncSession,
+    option_id: int,
+    user_id: int,
+    username: str | None,
+    first_name: str,
+) -> tuple[bool, int]:
+    result = await session.execute(
+        select(Vote).where(Vote.option_id == option_id, Vote.user_id == user_id)
+    )
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        await session.delete(existing)
+        voted_now = False
+    else:
+        session.add(Vote(option_id=option_id, user_id=user_id, username=username, first_name=first_name))
+        voted_now = True
+
+    await session.commit()
+    count = await get_vote_count(session, option_id)
+    return voted_now, count
+
+
+async def get_vote_count(session: AsyncSession, option_id: int) -> int:
+    result = await session.execute(select(Vote).where(Vote.option_id == option_id))
+    return len(result.scalars().all())
+
+
+async def get_voters(session: AsyncSession, option_id: int) -> list[Vote]:
+    result = await session.execute(
+        select(Vote).where(Vote.option_id == option_id).order_by(Vote.voted_at)
+    )
+    return list(result.scalars().all())
