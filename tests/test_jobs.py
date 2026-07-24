@@ -12,6 +12,19 @@ class FakeBot:
         self.sent_messages.append((chat_id, text))
 
 
+class FailingFakeBot:
+    """Fails send_message for a specific chat_id, records everything else."""
+
+    def __init__(self, fail_for_chat_id):
+        self.fail_for_chat_id = fail_for_chat_id
+        self.sent_messages = []
+
+    async def send_message(self, chat_id, text):
+        if chat_id == self.fail_for_chat_id:
+            raise RuntimeError("simulated Telegram API failure")
+        self.sent_messages.append((chat_id, text))
+
+
 async def test_threshold_check_callback_announces_when_still_at_threshold(session_maker):
     async with session_maker() as session:
         poll = await repo.create_poll(
@@ -85,3 +98,51 @@ async def test_daily_reminder_callback_skips_not_announced(session_maker):
     await callback()
 
     assert fake_bot.sent_messages == []
+
+
+async def test_threshold_check_callback_skips_deleted_option(session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=555, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+        option = (await repo.get_poll_options(session, poll.id))[0]
+        for user_id in range(4):
+            await repo.toggle_vote(
+                session, option.id, user_id=user_id, username=f"user{user_id}", first_name=f"User{user_id}"
+            )
+        await repo.delete_option(session, option.id)
+
+    fake_bot = FakeBot()
+    callback = jobs.make_threshold_check_callback(fake_bot, session_maker, admin_mention="@admin")
+    await callback(option.id)
+
+    assert fake_bot.sent_messages == []
+
+
+async def test_daily_reminder_callback_one_failed_send_does_not_block_others(session_maker):
+    tz = ZoneInfo("Europe/Moscow")
+    tomorrow = dt.datetime.now(tz).date() + dt.timedelta(days=1)
+
+    async with session_maker() as session:
+        failing_poll = await repo.create_poll(
+            session, chat_id=888, title="Игра A", options=[("Игра A", tomorrow)]
+        )
+        failing_option = (await repo.get_poll_options(session, failing_poll.id))[0]
+        await repo.toggle_vote(session, failing_option.id, user_id=1, username="alice", first_name="Alice")
+        await repo.set_announced(session, failing_option.id, True)
+
+        ok_poll = await repo.create_poll(session, chat_id=777, title="Игра B", options=[("Игра B", tomorrow)])
+        ok_option = (await repo.get_poll_options(session, ok_poll.id))[0]
+        await repo.toggle_vote(session, ok_option.id, user_id=2, username="bob", first_name="Bob")
+        await repo.set_announced(session, ok_option.id, True)
+
+    fake_bot = FailingFakeBot(fail_for_chat_id=888)
+    callback = jobs.make_daily_reminder_callback(fake_bot, session_maker, tz)
+    await callback()
+
+    assert len(fake_bot.sent_messages) == 1
+    assert fake_bot.sent_messages[0][0] == 777
+
+    async with session_maker() as session:
+        assert await repo.is_reminder_sent(session, failing_option.id) is False
+        assert await repo.is_reminder_sent(session, ok_option.id) is True

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from zoneinfo import ZoneInfo
 
 from bot import formatting, repo, threshold_logic
+
+logger = logging.getLogger(__name__)
 
 
 def make_threshold_check_callback(bot, session_maker, admin_mention: str):
@@ -17,14 +20,19 @@ def make_threshold_check_callback(bot, session_maker, admin_mention: str):
             if not threshold_logic.should_announce_on_timer_fire(count):
                 return
 
-            await repo.set_announced(session, option_id, True)
             poll = await repo.get_poll(session, option.poll_id)
             chat_id = poll.chat_id
             option_text = option.text
 
+        # Send before persisting `announced`, so a failed send leaves the
+        # option eligible to be re-announced on a future vote instead of
+        # silently marking it announced when the chat never saw the message.
         await bot.send_message(
             chat_id=chat_id, text=formatting.threshold_reached_text(admin_mention, option_text)
         )
+
+        async with session_maker() as session:
+            await repo.set_announced(session, option_id, True)
 
     return check_threshold
 
@@ -43,8 +51,14 @@ def make_daily_reminder_callback(bot, session_maker, timezone: ZoneInfo):
                 poll = await repo.get_poll(session, option.poll_id)
                 to_send.append((poll.chat_id, option.id, option.date, mentions))
 
-            for chat_id, option_id, option_date, mentions in to_send:
+        for chat_id, option_id, option_date, mentions in to_send:
+            try:
                 await bot.send_message(chat_id=chat_id, text=formatting.reminder_text(option_date, mentions))
+            except Exception:
+                logger.exception("Failed to send reminder for option %s in chat %s", option_id, chat_id)
+                continue
+
+            async with session_maker() as session:
                 await repo.set_reminder_sent(session, option_id, True)
 
     return send_due_reminders
