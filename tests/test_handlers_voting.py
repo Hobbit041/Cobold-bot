@@ -52,7 +52,11 @@ async def test_handle_vote_toggle_registers_vote_and_updates_keyboard(tmp_path, 
     async with session_maker() as session:
         assert await repo.get_vote_count(session, option.id) == 1
 
-    fake_bot.edit_message_reply_markup.assert_awaited_once()
+    fake_bot.edit_message_text.assert_awaited_once()
+    sent_kwargs = fake_bot.edit_message_text.await_args.kwargs
+    assert sent_kwargs["chat_id"] == 100
+    assert sent_kwargs["message_id"] == 42
+    assert "1 🗳" in sent_kwargs["text"]
     callback.answer.assert_awaited_once_with("Голос учтён!")
 
 
@@ -158,3 +162,41 @@ async def test_handle_vote_toggle_handles_concurrent_double_tap_integrity_error(
 
     async with session_maker() as session:
         assert await repo.get_vote_count(session, option.id) == 1
+
+
+async def test_handle_vote_toggle_survives_message_refresh_failure(tmp_path, session_maker):
+    """If bot.edit_message_text raises (stale/deleted poll message, permission
+    lost, transient API error), the vote is already committed and threshold
+    bookkeeping must still run -- the tapper must still get a callback answer
+    instead of a silently-spinning button.
+    """
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=100, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+        option = (await repo.get_poll_options(session, poll.id))[0]
+        for user_id in range(3):
+            await repo.toggle_vote(
+                session, option.id, user_id=user_id, username=f"u{user_id}", first_name=f"U{user_id}"
+            )
+
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
+    fake_bot = AsyncMock()
+    fake_bot.edit_message_text.side_effect = Exception("message to edit not found")
+    callback = FakeCallback(data=f"vote:{option.id}", user=FakeUser(id=99, username="last", first_name="Last"))
+
+    await handle_vote_toggle(
+        callback,
+        session_maker=session_maker,
+        scheduler=scheduler,
+        bot=fake_bot,
+        admin_mention="@admin",
+        threshold_check_callback=_noop_threshold_callback,
+    )
+
+    async with session_maker() as session:
+        assert await repo.get_vote_count(session, option.id) == 4
+
+    assert scheduler.get_job(threshold_job_id(option.id)) is not None
+    callback.answer.assert_awaited_once_with("Голос учтён!")

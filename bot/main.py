@@ -5,8 +5,6 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
 
@@ -28,7 +26,12 @@ async def main() -> None:
     engine, session_maker = create_engine_and_sessionmaker(config.db_path)
     await init_db(engine)
 
-    bot = Bot(token=config.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    # No parse_mode is set: no formatting function anywhere in this codebase emits
+    # HTML/Markdown, and poll titles/option text/participant names are untrusted
+    # user input passed straight through -- setting a parse mode without escaping
+    # that input would make Telegram reject messages containing plain "&"/"<"/">"
+    # (e.g. a poll titled "Coffee & Games", or a voter whose display name has one).
+    bot = Bot(token=config.bot_token)
     dp = Dispatcher(storage=MemoryStorage())  # in-process only; a restart mid-flow silently drops admin conversation state -- acceptable at this bot's scale
     dp.include_router(admin_create.router)
     dp.include_router(admin_edit.router)

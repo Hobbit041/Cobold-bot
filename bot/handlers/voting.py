@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
+
 from aiogram import Bot, F, Router
 from aiogram.types import CallbackQuery
 from sqlalchemy.exc import IntegrityError
 
 from bot import formatting, keyboards, repo, threshold_logic
 from bot.scheduler import cancel_threshold_check, schedule_threshold_check
+
+logger = logging.getLogger(__name__)
 
 router = Router(name="voting")
 
@@ -50,12 +54,23 @@ async def handle_vote_toggle(
         counts = {opt.id: await repo.get_vote_count(session, opt.id) for opt in poll_options}
         option_text = option.text
 
+    lines = [
+        formatting.format_option_line(i + 1, opt.text, opt.date, counts[opt.id])
+        for i, opt in enumerate(poll_options)
+    ]
+    text = formatting.poll_message_text(poll.title, lines)
     keyboard = keyboards.build_poll_keyboard(
         [(opt.id, opt.text, counts[opt.id]) for opt in poll_options]
     )
-    await bot.edit_message_reply_markup(
-        chat_id=poll.chat_id, message_id=poll.message_id, reply_markup=keyboard
-    )
+    try:
+        await bot.edit_message_text(
+            chat_id=poll.chat_id, message_id=poll.message_id, text=text, reply_markup=keyboard
+        )
+    except Exception:
+        # The vote is already committed; a stale/undeletable poll message
+        # shouldn't block threshold bookkeeping or leave the tapper without
+        # a response below.
+        logger.exception("Failed to refresh poll message for poll %s", poll.id)
 
     action = threshold_logic.decide_action_after_vote_change(new_count, announced)
 
@@ -66,6 +81,9 @@ async def handle_vote_toggle(
     elif action == threshold_logic.ANNOUNCE_DROP:
         async with session_maker() as session:
             await repo.set_announced(session, option_id, False)
-        await bot.send_message(chat_id=poll.chat_id, text=formatting.threshold_dropped_text(option_text))
+        try:
+            await bot.send_message(chat_id=poll.chat_id, text=formatting.threshold_dropped_text(option_text))
+        except Exception:
+            logger.exception("Failed to send threshold-drop message for option %s", option_id)
 
     await callback.answer("Голос учтён!" if voted_now else "Голос снят.")
