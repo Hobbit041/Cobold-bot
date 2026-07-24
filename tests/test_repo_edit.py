@@ -1,6 +1,7 @@
 import datetime as dt
 
 from bot import repo
+from bot.models import Reminder, ThresholdState
 
 
 async def test_edit_option_text(session_maker, poll_and_option):
@@ -26,3 +27,5 @@ async def test_delete_option_removes_votes_and_marks_deleted(session_maker, poll
         remaining_options = await repo.get_poll_options(session, poll_id)
         assert remaining_options == []
         assert await repo.get_vote_count(session, option_id) == 0
+        assert await session.get(ThresholdState, option_id) is None
+        assert await session.get(Reminder, option_id) is None
