@@ -1,0 +1,14 @@
+[Unit]
+Description=Botopros Telegram poll bot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/botopros
+EnvironmentFile=/opt/botopros/.env
+ExecStart=/opt/botopros/.venv/bin/python -m bot.main
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
