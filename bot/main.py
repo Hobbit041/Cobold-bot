@@ -8,6 +8,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from dotenv import load_dotenv
 
 from bot import jobs
 from bot.config import load_config
@@ -18,6 +19,10 @@ from bot.scheduler import create_scheduler, schedule_daily_reminder_job
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    # Populates os.environ from a .env file in the working directory, if present.
+    # Only fills in variables not already set, so it's a no-op under systemd
+    # deployments where EnvironmentFile= has already loaded them directly.
+    load_dotenv()
     config = load_config()
 
     engine, session_maker = create_engine_and_sessionmaker(config.db_path)
