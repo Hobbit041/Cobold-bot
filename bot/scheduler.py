@@ -31,6 +31,13 @@ def create_scheduler(jobs_db_path: str, timezone: ZoneInfo) -> AsyncIOScheduler:
     only exercise scheduling/cancellation bookkeeping.
 
     Callers must NOT call `.start()` again on the returned scheduler.
+
+    Note: `.shutdown()` is likewise inert on a scheduler built from a
+    synchronous caller (the throwaway-loop branch above) -- it only enqueues
+    cleanup on the loop via `call_soon_threadsafe`, and since that loop is
+    never run, the enqueued callback never executes and the job store never
+    actually releases its connection. This is harmless for short-lived test
+    processes but is a footgun for anyone adding explicit teardown later.
     """
     jobstore = SQLAlchemyJobStore(url=f"sqlite:///{jobs_db_path}")
     try:
