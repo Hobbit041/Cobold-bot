@@ -22,6 +22,7 @@ async def handle_vote_toggle(
     bot: Bot,
     admin_mention: str,
     threshold_check_callback,
+    threshold_debounce_seconds: int,
 ) -> None:
     option_id = int(callback.data.split(":", 1)[1])
     user = callback.from_user
@@ -84,7 +85,9 @@ async def handle_vote_toggle(
     action = threshold_logic.decide_action_after_vote_change(new_count, announced)
 
     if action == threshold_logic.SCHEDULE_TIMER:
-        schedule_threshold_check(scheduler, option_id, threshold_check_callback, delay_minutes=15)
+        schedule_threshold_check(
+            scheduler, option_id, threshold_check_callback, delay_seconds=threshold_debounce_seconds
+        )
     elif action == threshold_logic.CANCEL_TIMER:
         cancel_threshold_check(scheduler, option_id)
     elif action == threshold_logic.ANNOUNCE_DROP:

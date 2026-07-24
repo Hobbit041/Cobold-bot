@@ -15,6 +15,7 @@ class Config:
     reminder_minute: int
     db_path: str
     jobs_db_path: str
+    threshold_debounce_seconds: int
 
 
 def load_config() -> Config:
@@ -28,6 +29,7 @@ def load_config() -> Config:
 
     db_path = os.environ.get("DB_PATH", "poll_bot.sqlite3")
     jobs_db_path = os.environ.get("JOBS_DB_PATH", "jobs.sqlite3")
+    threshold_debounce_seconds = int(os.environ.get("THRESHOLD_DEBOUNCE_SECONDS", "900"))
 
     return Config(
         bot_token=bot_token,
@@ -38,4 +40,5 @@ def load_config() -> Config:
         reminder_minute=int(minute_str),
         db_path=db_path,
         jobs_db_path=jobs_db_path,
+        threshold_debounce_seconds=threshold_debounce_seconds,
     )

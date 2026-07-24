@@ -56,9 +56,9 @@ def threshold_job_id(option_id: int) -> str:
 
 
 def schedule_threshold_check(
-    scheduler: AsyncIOScheduler, option_id: int, callback, delay_minutes: int = 15
+    scheduler: AsyncIOScheduler, option_id: int, callback, delay_seconds: int = 900
 ) -> None:
-    run_date = dt.datetime.now(scheduler.timezone) + dt.timedelta(minutes=delay_minutes)
+    run_date = dt.datetime.now(scheduler.timezone) + dt.timedelta(seconds=delay_seconds)
     scheduler.add_job(
         callback,
         trigger=DateTrigger(run_date=run_date),

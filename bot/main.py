@@ -57,6 +57,7 @@ async def main() -> None:
             admin_mention=admin_mention,
             admin_id=config.admin_id,
             threshold_check_callback=jobs.check_threshold,
+            threshold_debounce_seconds=config.threshold_debounce_seconds,
         )
     finally:
         # AsyncIOScheduler.shutdown() defers to a call_soon_threadsafe callback, and

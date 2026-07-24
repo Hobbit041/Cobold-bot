@@ -20,7 +20,7 @@ def _noop_daily():
 def test_schedule_threshold_check_creates_job(tmp_path):
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
 
-    schedule_threshold_check(scheduler, option_id=1, callback=_noop, delay_minutes=15)
+    schedule_threshold_check(scheduler, option_id=1, callback=_noop, delay_seconds=900)
 
     job = scheduler.get_job(threshold_job_id(1))
     assert job is not None
@@ -29,10 +29,10 @@ def test_schedule_threshold_check_creates_job(tmp_path):
 def test_schedule_threshold_check_replaces_existing_job(tmp_path):
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
 
-    schedule_threshold_check(scheduler, option_id=1, callback=_noop, delay_minutes=15)
+    schedule_threshold_check(scheduler, option_id=1, callback=_noop, delay_seconds=900)
     first_run_time = scheduler.get_job(threshold_job_id(1)).next_run_time
 
-    schedule_threshold_check(scheduler, option_id=1, callback=_noop, delay_minutes=20)
+    schedule_threshold_check(scheduler, option_id=1, callback=_noop, delay_seconds=1200)
     second_run_time = scheduler.get_job(threshold_job_id(1)).next_run_time
 
     assert len(scheduler.get_jobs()) == 1
@@ -41,7 +41,7 @@ def test_schedule_threshold_check_replaces_existing_job(tmp_path):
 
 def test_cancel_threshold_check_removes_job(tmp_path):
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
-    schedule_threshold_check(scheduler, option_id=1, callback=_noop, delay_minutes=15)
+    schedule_threshold_check(scheduler, option_id=1, callback=_noop, delay_seconds=900)
 
     cancel_threshold_check(scheduler, option_id=1)
 

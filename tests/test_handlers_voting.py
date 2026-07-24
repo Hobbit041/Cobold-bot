@@ -47,6 +47,7 @@ async def test_handle_vote_toggle_registers_vote_and_updates_keyboard(tmp_path, 
         bot=fake_bot,
         admin_mention="@admin",
         threshold_check_callback=_noop_threshold_callback,
+        threshold_debounce_seconds=900,
     )
 
     async with session_maker() as session:
@@ -83,6 +84,7 @@ async def test_handle_vote_toggle_reaching_threshold_schedules_job(tmp_path, ses
         bot=fake_bot,
         admin_mention="@admin",
         threshold_check_callback=_noop_threshold_callback,
+        threshold_debounce_seconds=900,
     )
 
     assert scheduler.get_job(threshold_job_id(option.id)) is not None
@@ -112,6 +114,7 @@ async def test_handle_vote_toggle_dropping_below_threshold_sends_drop_message(tm
         bot=fake_bot,
         admin_mention="@admin",
         threshold_check_callback=_noop_threshold_callback,
+        threshold_debounce_seconds=900,
     )
 
     fake_bot.send_message.assert_awaited_once_with(
@@ -155,6 +158,7 @@ async def test_handle_vote_toggle_handles_concurrent_double_tap_integrity_error(
         bot=fake_bot,
         admin_mention="@admin",
         threshold_check_callback=_noop_threshold_callback,
+        threshold_debounce_seconds=900,
     )
 
     callback.answer.assert_awaited_once()
@@ -193,6 +197,7 @@ async def test_handle_vote_toggle_survives_message_refresh_failure(tmp_path, ses
         bot=fake_bot,
         admin_mention="@admin",
         threshold_check_callback=_noop_threshold_callback,
+        threshold_debounce_seconds=900,
     )
 
     async with session_maker() as session:
@@ -227,6 +232,7 @@ async def test_handle_vote_toggle_message_shows_voter_names(tmp_path, session_ma
         bot=fake_bot,
         admin_mention="@admin",
         threshold_check_callback=_noop_threshold_callback,
+        threshold_debounce_seconds=900,
     )
 
     sent_text = fake_bot.edit_message_text.await_args.kwargs["text"]
@@ -236,3 +242,36 @@ async def test_handle_vote_toggle_message_shows_voter_names(tmp_path, session_ma
         "   @alice\n"
         "2. 25.07 (25 июля) — 0 🗳"
     )
+
+
+async def test_handle_vote_toggle_uses_configured_debounce_seconds(tmp_path, session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=100, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+        option = (await repo.get_poll_options(session, poll.id))[0]
+        for user_id in range(3):
+            await repo.toggle_vote(
+                session, option.id, user_id=user_id, username=f"u{user_id}", first_name=f"U{user_id}"
+            )
+
+    tz = ZoneInfo("Europe/Moscow")
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), tz)
+    fake_bot = AsyncMock()
+    callback = FakeCallback(data=f"vote:{option.id}", user=FakeUser(id=99, username="last", first_name="Last"))
+
+    before = dt.datetime.now(tz)
+    await handle_vote_toggle(
+        callback,
+        session_maker=session_maker,
+        scheduler=scheduler,
+        bot=fake_bot,
+        admin_mention="@admin",
+        threshold_check_callback=_noop_threshold_callback,
+        threshold_debounce_seconds=10,
+    )
+    after = dt.datetime.now(tz)
+
+    next_run_time = scheduler.get_job(threshold_job_id(option.id)).next_run_time
+    assert before + dt.timedelta(seconds=10) <= next_run_time <= after + dt.timedelta(seconds=10)
