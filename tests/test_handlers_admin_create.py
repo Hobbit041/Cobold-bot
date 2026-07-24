@@ -73,6 +73,57 @@ async def test_full_create_flow_persists_poll(session_maker):
         assert poll.message_id == 999
 
 
+async def test_receive_option_accepts_slash_separator():
+    state = _state()
+    await state.set_state(CreatePollStates.waiting_options)
+    await state.update_data(options=[])
+
+    message = FakeMessage("24.07 / 24.07.2026")
+    await receive_option(message, state)
+
+    data = await state.get_data()
+    assert data["options"] == [{"text": "24.07", "date": "2026-07-24"}]
+    message.answer.assert_awaited_once()
+    assert "Добавлено" in message.answer.await_args.args[0]
+
+
+async def test_receive_option_accepts_backslash_separator():
+    state = _state()
+    await state.set_state(CreatePollStates.waiting_options)
+    await state.update_data(options=[])
+
+    message = FakeMessage("24.07 \\ 24.07.2026")
+    await receive_option(message, state)
+
+    data = await state.get_data()
+    assert data["options"] == [{"text": "24.07", "date": "2026-07-24"}]
+
+
+async def test_receive_option_still_accepts_pipe_separator():
+    state = _state()
+    await state.set_state(CreatePollStates.waiting_options)
+    await state.update_data(options=[])
+
+    message = FakeMessage("24.07 | 24.07.2026")
+    await receive_option(message, state)
+
+    data = await state.get_data()
+    assert data["options"] == [{"text": "24.07", "date": "2026-07-24"}]
+
+
+async def test_receive_option_rejects_line_with_no_separator():
+    state = _state()
+    await state.set_state(CreatePollStates.waiting_options)
+    await state.update_data(options=[])
+
+    message = FakeMessage("24.07 24.07.2026")
+    await receive_option(message, state)
+
+    message.answer.assert_awaited_once()
+    data = await state.get_data()
+    assert data["options"] == []
+
+
 async def test_receive_target_chat_cleans_up_when_send_fails(session_maker):
     state = _state()
 

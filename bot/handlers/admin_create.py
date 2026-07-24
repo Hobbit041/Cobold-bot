@@ -8,6 +8,7 @@ bot.keyboards / bot.repo.
 from __future__ import annotations
 
 import datetime as dt
+import re
 
 from aiogram import Bot, Router
 from aiogram.filters import Command
@@ -18,6 +19,9 @@ from aiogram.types import Message
 from bot import date_utils, formatting, keyboards, repo
 
 router = Router(name="admin_create")
+
+# Splits "Текст | ДД.ММ.ГГГГ" (and the /, \ variants) at the first separator.
+_OPTION_SEPARATOR_PATTERN = re.compile(r"[|/\\]")
 
 
 class CreatePollStates(StatesGroup):
@@ -51,7 +55,7 @@ async def receive_title(message: Message, state: FSMContext) -> None:
     await state.set_state(CreatePollStates.waiting_options)
     await message.answer(
         "Теперь добавляйте варианты по одному в формате:\n"
-        "Текст | ДД.ММ.ГГГГ\n"
+        "Текст | ДД.ММ.ГГГГ (вместо | подойдёт и / или \\)\n"
         "Когда закончите — отправьте /done"
     )
 
@@ -70,11 +74,13 @@ async def finish_options(message: Message, state: FSMContext) -> None:
 
 @router.message(CreatePollStates.waiting_options)
 async def receive_option(message: Message, state: FSMContext) -> None:
-    if not message.text or "|" not in message.text:
-        await message.answer("Формат: Текст | ДД.ММ.ГГГГ. Попробуйте снова.")
+    match = _OPTION_SEPARATOR_PATTERN.search(message.text) if message.text else None
+    if not match:
+        await message.answer("Формат: Текст | ДД.ММ.ГГГГ (вместо | подойдёт и / или \\). Попробуйте снова.")
         return
 
-    text_part, date_part = message.text.split("|", 1)
+    text_part = message.text[: match.start()]
+    date_part = message.text[match.end():]
     text_part = text_part.strip()
     try:
         parsed_date = date_utils.parse_date_input(date_part.strip())
