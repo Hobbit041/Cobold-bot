@@ -11,8 +11,17 @@ def voter_mention(username: str | None, first_name: str) -> str:
     return first_name
 
 
-def format_option_line(index: int, option_text: str, option_date: dt.date, vote_count: int) -> str:
-    return f"{index}. {option_text} ({format_date_ru(option_date)}) — {vote_count} 🗳"
+def format_option_line(
+    index: int,
+    option_text: str,
+    option_date: dt.date,
+    vote_count: int,
+    voter_mentions: list[str] | None = None,
+) -> str:
+    line = f"{index}. {option_text} ({format_date_ru(option_date)}) — {vote_count} 🗳"
+    if voter_mentions:
+        line += f"\n   {', '.join(voter_mentions)}"
+    return line
 
 
 def poll_message_text(title: str, option_lines: list[str]) -> str:

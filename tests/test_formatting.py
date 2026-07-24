@@ -1,6 +1,7 @@
 import datetime as dt
 
 from bot.formatting import (
+    format_option_line,
     option_date_changed_notification,
     option_deleted_notification,
     option_text_changed_notification,
@@ -18,6 +19,21 @@ def test_voter_mention_with_username():
 
 def test_voter_mention_without_username_falls_back_to_first_name():
     assert voter_mention(None, "Bob") == "Bob"
+
+
+def test_format_option_line_without_voters():
+    line = format_option_line(1, "24.07", dt.date(2026, 7, 24), 2)
+    assert line == "1. 24.07 (24 июля) — 2 🗳"
+
+
+def test_format_option_line_with_voters():
+    line = format_option_line(1, "24.07", dt.date(2026, 7, 24), 2, ["@alice", "Bob"])
+    assert line == "1. 24.07 (24 июля) — 2 🗳\n   @alice, Bob"
+
+
+def test_format_option_line_with_empty_voter_list():
+    line = format_option_line(1, "24.07", dt.date(2026, 7, 24), 0, [])
+    assert line == "1. 24.07 (24 июля) — 0 🗳"
 
 
 def test_poll_message_text_joins_lines():
