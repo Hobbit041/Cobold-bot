@@ -28,5 +28,15 @@ def test_parse_invalid_calendar_date_raises():
         parse_date_input("32.13.2026")
 
 
+def test_parse_invalid_year_length_single_digit_raises():
+    with pytest.raises(DateParseError):
+        parse_date_input("24.07.6")
+
+
+def test_parse_invalid_year_length_three_digit_raises():
+    with pytest.raises(DateParseError):
+        parse_date_input("24.07.026")
+
+
 def test_format_date_ru():
     assert format_date_ru(dt.date(2026, 7, 24)) == "24 июля"

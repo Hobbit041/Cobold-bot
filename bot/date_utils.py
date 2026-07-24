@@ -22,7 +22,14 @@ def parse_date_input(text: str, today: dt.date | None = None) -> dt.date:
         year = today.year
     elif len(parts) == 3:
         day_str, month_str, year_str = parts
-        year = 2000 + int(year_str) if len(year_str) == 2 else int(year_str)
+        if len(year_str) == 2:
+            year = 2000 + int(year_str)
+        elif len(year_str) == 4:
+            year = int(year_str)
+        else:
+            raise DateParseError(
+                f"Не удалось разобрать дату: {text!r}. Используйте формат ДД.ММ или ДД.ММ.ГГГГ"
+            )
     else:
         raise DateParseError(
             f"Не удалось разобрать дату: {text!r}. Используйте формат ДД.ММ или ДД.ММ.ГГГГ"
