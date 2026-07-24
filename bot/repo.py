@@ -94,3 +94,41 @@ async def get_voters(session: AsyncSession, option_id: int) -> list[Vote]:
         select(Vote).where(Vote.option_id == option_id).order_by(Vote.voted_at)
     )
     return list(result.scalars().all())
+
+
+# --- Edit / delete option ---------------------------------------------------
+
+
+async def edit_option_text(session: AsyncSession, option_id: int, new_text: str) -> Option:
+    option = await session.get(Option, option_id)
+    option.text = new_text
+    await session.commit()
+    await session.refresh(option)
+    return option
+
+
+async def edit_option_date(session: AsyncSession, option_id: int, new_date: dt.date) -> Option:
+    option = await session.get(Option, option_id)
+    option.date = new_date
+    await session.commit()
+    await session.refresh(option)
+    return option
+
+
+async def delete_option(session: AsyncSession, option_id: int) -> None:
+    votes = await get_voters(session, option_id)
+    for vote in votes:
+        await session.delete(vote)
+
+    option = await session.get(Option, option_id)
+    option.is_deleted = True
+
+    threshold_state = await session.get(ThresholdState, option_id)
+    if threshold_state:
+        await session.delete(threshold_state)
+
+    reminder = await session.get(Reminder, option_id)
+    if reminder:
+        await session.delete(reminder)
+
+    await session.commit()
