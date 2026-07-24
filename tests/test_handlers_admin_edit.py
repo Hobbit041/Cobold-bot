@@ -187,3 +187,34 @@ async def test_edit_text_survives_refresh_failure_and_still_replies(tmp_path, se
 
     # The admin got some reply rather than silence / an unhandled exception.
     final_message.answer.assert_awaited_once()
+
+
+async def test_apply_new_text_shows_voter_names_for_all_options(tmp_path, session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session,
+            chat_id=100,
+            title="Игра",
+            options=[("24.07", dt.date(2026, 7, 24)), ("25.07", dt.date(2026, 7, 25))],
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+        options = await repo.get_poll_options(session, poll.id)
+        edited_option, other_option = options
+        await repo.toggle_vote(session, edited_option.id, user_id=5, username="alice", first_name="Alice")
+        await repo.toggle_vote(session, other_option.id, user_id=6, username="bob", first_name="Bob")
+
+    state = _state()
+    fake_bot = AsyncMock()
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
+
+    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await select_poll(FakeMessage("1"), state, session_maker=session_maker)
+    await select_option(FakeMessage("1"), state)
+    await select_action(
+        FakeMessage("text"), state, bot=fake_bot, session_maker=session_maker, scheduler=scheduler
+    )
+    await apply_new_text(FakeMessage("24.07 (в 19:00)"), state, bot=fake_bot, session_maker=session_maker)
+
+    sent_text = fake_bot.edit_message_text.await_args.kwargs["text"]
+    assert "1. 24.07 (в 19:00) (24 июля) — 1 🗳\n   @alice" in sent_text
+    assert "2. 25.07 (25 июля) — 1 🗳\n   @bob" in sent_text

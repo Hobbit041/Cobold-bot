@@ -145,13 +145,22 @@ async def apply_new_text(message: Message, state: FSMContext, bot: Bot, session_
         poll = await repo.get_poll(session, updated.poll_id)
         poll_options = await repo.get_poll_options(session, updated.poll_id)
         counts = {opt.id: await repo.get_vote_count(session, opt.id) for opt in poll_options}
+        voters_by_option = {
+            opt.id: [
+                formatting.voter_mention(v.username, v.first_name)
+                for v in await repo.get_voters(session, opt.id)
+            ]
+            for opt in poll_options
+        }
 
     notification_text = None
     if voters:
         mentions = [formatting.voter_mention(v.username, v.first_name) for v in voters]
         notification_text = formatting.option_text_changed_notification(old_text, new_text, mentions)
 
-    success = await _refresh_and_notify(bot, poll, poll_options, counts, voters, notification_text)
+    success = await _refresh_and_notify(
+        bot, poll, poll_options, counts, voters_by_option, voters, notification_text
+    )
 
     await state.clear()
     await message.answer("Вариант обновлён." if success else _PARTIAL_FAILURE_MESSAGE)
@@ -185,13 +194,22 @@ async def apply_new_date(message: Message, state: FSMContext, bot: Bot, session_
         poll = await repo.get_poll(session, updated.poll_id)
         poll_options = await repo.get_poll_options(session, updated.poll_id)
         counts = {opt.id: await repo.get_vote_count(session, opt.id) for opt in poll_options}
+        voters_by_option = {
+            opt.id: [
+                formatting.voter_mention(v.username, v.first_name)
+                for v in await repo.get_voters(session, opt.id)
+            ]
+            for opt in poll_options
+        }
 
     notification_text = None
     if voters:
         mentions = [formatting.voter_mention(v.username, v.first_name) for v in voters]
         notification_text = formatting.option_date_changed_notification(updated.text, old_date, new_date, mentions)
 
-    success = await _refresh_and_notify(bot, poll, poll_options, counts, voters, notification_text)
+    success = await _refresh_and_notify(
+        bot, poll, poll_options, counts, voters_by_option, voters, notification_text
+    )
 
     await state.clear()
     await message.answer("Дата варианта обновлена." if success else _PARTIAL_FAILURE_MESSAGE)
@@ -211,6 +229,13 @@ async def _apply_delete(message: Message, state: FSMContext, bot: Bot, session_m
         await repo.delete_option(session, option_id)
         poll_options = await repo.get_poll_options(session, option.poll_id)
         counts = {opt.id: await repo.get_vote_count(session, opt.id) for opt in poll_options}
+        voters_by_option = {
+            opt.id: [
+                formatting.voter_mention(v.username, v.first_name)
+                for v in await repo.get_voters(session, opt.id)
+            ]
+            for opt in poll_options
+        }
 
     cancel_threshold_check(scheduler, option_id)
 
@@ -219,7 +244,9 @@ async def _apply_delete(message: Message, state: FSMContext, bot: Bot, session_m
         mentions = [formatting.voter_mention(v.username, v.first_name) for v in voters]
         notification_text = formatting.option_deleted_notification(option_text, mentions)
 
-    success = await _refresh_and_notify(bot, poll, poll_options, counts, voters, notification_text)
+    success = await _refresh_and_notify(
+        bot, poll, poll_options, counts, voters_by_option, voters, notification_text
+    )
 
     await state.clear()
     await message.answer("Вариант удалён." if success else _PARTIAL_FAILURE_MESSAGE)
@@ -230,6 +257,7 @@ async def _refresh_and_notify(
     poll: Poll,
     poll_options,
     counts: dict[int, int],
+    voters_by_option: dict[int, list[str]],
     voters,
     notification_text: str | None,
 ) -> bool:
@@ -245,7 +273,7 @@ async def _refresh_and_notify(
     """
     ok = True
     try:
-        await _refresh_poll_message(bot, poll, poll_options, counts)
+        await _refresh_poll_message(bot, poll, poll_options, counts, voters_by_option)
     except Exception:
         logger.exception("Failed to refresh poll message for poll %s", poll.id)
         ok = False
@@ -260,9 +288,17 @@ async def _refresh_and_notify(
     return ok
 
 
-async def _refresh_poll_message(bot: Bot, poll: Poll, poll_options, counts: dict[int, int]) -> None:
+async def _refresh_poll_message(
+    bot: Bot,
+    poll: Poll,
+    poll_options,
+    counts: dict[int, int],
+    voters_by_option: dict[int, list[str]],
+) -> None:
     lines = [
-        formatting.format_option_line(i + 1, opt.text, opt.date, counts[opt.id])
+        formatting.format_option_line(
+            i + 1, opt.text, opt.date, counts[opt.id], voters_by_option.get(opt.id, [])
+        )
         for i, opt in enumerate(poll_options)
     ]
     text = formatting.poll_message_text(poll.title, lines)
