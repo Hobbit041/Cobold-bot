@@ -123,7 +123,17 @@ async def receive_target_chat(message: Message, state: FSMContext, bot: Bot, ses
         text = formatting.poll_message_text(title, lines)
         keyboard = keyboards.build_poll_keyboard([(opt.id, opt.text, 0) for opt in poll_options])
 
-        sent = await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
+        try:
+            sent = await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
+        except Exception:
+            await session.delete(poll)
+            await session.commit()
+            await message.answer(
+                "Не удалось отправить опрос в этот чат. Проверьте, что бот добавлен в чат "
+                "и id указан верно, затем пришлите чат ещё раз."
+            )
+            return
+
         await repo.set_poll_message(session, poll.id, sent.message_id)
 
     await state.clear()

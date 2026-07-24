@@ -71,3 +71,29 @@ async def test_full_create_flow_persists_poll(session_maker):
         assert poll.title == "Игра в апреле"
         assert poll.chat_id == -100123
         assert poll.message_id == 999
+
+
+async def test_receive_target_chat_cleans_up_when_send_fails(session_maker):
+    state = _state()
+
+    admin_message = FakeMessage("/newpoll", user_id=1)
+    await start_create_poll(admin_message, state, admin_id=1)
+    await receive_title(FakeMessage("Игра в апреле"), state)
+    await receive_option(FakeMessage("24.07 | 24.07.2026"), state)
+    await finish_options(FakeMessage("/done"), state)
+
+    fake_bot = AsyncMock()
+    fake_bot.send_message.side_effect = Exception("chat not found")
+
+    target_message = FakeMessage("-100123")
+    await receive_target_chat(target_message, state, bot=fake_bot, session_maker=session_maker)
+
+    target_message.answer.assert_awaited_once()
+    error_text = target_message.answer.await_args.args[0]
+    assert "не удалось" in error_text.lower() or "не уда" in error_text.lower()
+
+    async with session_maker() as session:
+        result = await session.execute(select(Poll))
+        assert result.scalars().all() == []
+
+    assert await state.get_state() == CreatePollStates.waiting_chat.state
