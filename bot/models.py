@@ -39,10 +39,10 @@ class Option(Base):
     votes: Mapped[list["Vote"]] = relationship(
         back_populates="option", cascade="all, delete-orphan"
     )
-    threshold_state: Mapped["ThresholdState"] = relationship(
+    threshold_state: Mapped["ThresholdState | None"] = relationship(
         back_populates="option", cascade="all, delete-orphan", uselist=False
     )
-    reminder: Mapped["Reminder"] = relationship(
+    reminder: Mapped["Reminder | None"] = relationship(
         back_populates="option", cascade="all, delete-orphan", uselist=False
     )
 
