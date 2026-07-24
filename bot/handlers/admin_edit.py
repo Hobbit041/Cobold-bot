@@ -8,6 +8,8 @@ cancelled through bot.scheduler when its option is deleted.
 
 from __future__ import annotations
 
+import logging
+
 from aiogram import Bot, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -20,6 +22,13 @@ from bot.models import Poll
 from bot.scheduler import cancel_threshold_check
 
 router = Router(name="admin_edit")
+logger = logging.getLogger(__name__)
+
+_OPTION_GONE_MESSAGE = "Этот вариант больше недоступен (возможно, уже удалён)."
+_PARTIAL_FAILURE_MESSAGE = (
+    "Изменения сохранены в базе, но не удалось обновить сообщение в чате и/или "
+    "уведомить проголосовавших. Проверьте опрос вручную."
+)
 
 
 class EditPollStates(StatesGroup):
@@ -125,6 +134,11 @@ async def apply_new_text(message: Message, state: FSMContext, bot: Bot, session_
 
     async with session_maker() as session:
         option = await session.get(repo.Option, option_id)
+        if option is None:
+            await state.clear()
+            await message.answer(_OPTION_GONE_MESSAGE)
+            return
+
         old_text = option.text
         voters = await repo.get_voters(session, option_id)
         updated = await repo.edit_option_text(session, option_id, new_text)
@@ -132,16 +146,15 @@ async def apply_new_text(message: Message, state: FSMContext, bot: Bot, session_
         poll_options = await repo.get_poll_options(session, updated.poll_id)
         counts = {opt.id: await repo.get_vote_count(session, opt.id) for opt in poll_options}
 
-    await _refresh_poll_message(bot, poll, poll_options, counts)
-
+    notification_text = None
     if voters:
         mentions = [formatting.voter_mention(v.username, v.first_name) for v in voters]
-        await bot.send_message(
-            chat_id=poll.chat_id, text=formatting.option_text_changed_notification(old_text, new_text, mentions)
-        )
+        notification_text = formatting.option_text_changed_notification(old_text, new_text, mentions)
+
+    success = await _refresh_and_notify(bot, poll, poll_options, counts, voters, notification_text)
 
     await state.clear()
-    await message.answer("Вариант обновлён.")
+    await message.answer("Вариант обновлён." if success else _PARTIAL_FAILURE_MESSAGE)
 
 
 @router.message(EditPollStates.waiting_new_date)
@@ -161,6 +174,11 @@ async def apply_new_date(message: Message, state: FSMContext, bot: Bot, session_
 
     async with session_maker() as session:
         option = await session.get(repo.Option, option_id)
+        if option is None:
+            await state.clear()
+            await message.answer(_OPTION_GONE_MESSAGE)
+            return
+
         old_date = option.date
         voters = await repo.get_voters(session, option_id)
         updated = await repo.edit_option_date(session, option_id, new_date)
@@ -168,20 +186,25 @@ async def apply_new_date(message: Message, state: FSMContext, bot: Bot, session_
         poll_options = await repo.get_poll_options(session, updated.poll_id)
         counts = {opt.id: await repo.get_vote_count(session, opt.id) for opt in poll_options}
 
-    await _refresh_poll_message(bot, poll, poll_options, counts)
-
+    notification_text = None
     if voters:
         mentions = [formatting.voter_mention(v.username, v.first_name) for v in voters]
-        text = formatting.option_date_changed_notification(updated.text, old_date, new_date, mentions)
-        await bot.send_message(chat_id=poll.chat_id, text=text)
+        notification_text = formatting.option_date_changed_notification(updated.text, old_date, new_date, mentions)
+
+    success = await _refresh_and_notify(bot, poll, poll_options, counts, voters, notification_text)
 
     await state.clear()
-    await message.answer("Дата варианта обновлена.")
+    await message.answer("Дата варианта обновлена." if success else _PARTIAL_FAILURE_MESSAGE)
 
 
 async def _apply_delete(message: Message, state: FSMContext, bot: Bot, session_maker, scheduler, option_id: int) -> None:
     async with session_maker() as session:
         option = await session.get(repo.Option, option_id)
+        if option is None:
+            await state.clear()
+            await message.answer(_OPTION_GONE_MESSAGE)
+            return
+
         option_text = option.text
         voters = await repo.get_voters(session, option_id)
         poll = await repo.get_poll(session, option.poll_id)
@@ -190,14 +213,51 @@ async def _apply_delete(message: Message, state: FSMContext, bot: Bot, session_m
         counts = {opt.id: await repo.get_vote_count(session, opt.id) for opt in poll_options}
 
     cancel_threshold_check(scheduler, option_id)
-    await _refresh_poll_message(bot, poll, poll_options, counts)
 
+    notification_text = None
     if voters:
         mentions = [formatting.voter_mention(v.username, v.first_name) for v in voters]
-        await bot.send_message(chat_id=poll.chat_id, text=formatting.option_deleted_notification(option_text, mentions))
+        notification_text = formatting.option_deleted_notification(option_text, mentions)
+
+    success = await _refresh_and_notify(bot, poll, poll_options, counts, voters, notification_text)
 
     await state.clear()
-    await message.answer("Вариант удалён.")
+    await message.answer("Вариант удалён." if success else _PARTIAL_FAILURE_MESSAGE)
+
+
+async def _refresh_and_notify(
+    bot: Bot,
+    poll: Poll,
+    poll_options,
+    counts: dict[int, int],
+    voters,
+    notification_text: str | None,
+) -> bool:
+    """Refresh the live poll message and notify voters (if any).
+
+    Both calls hit the Telegram API and can fail independently (e.g. the
+    poll's message was manually deleted from the chat, or a transient error).
+    Failures here must never propagate: callers rely on always reaching
+    state.clear() and always answering the admin, so a bad network call
+    doesn't strand the FSM in a state where the *next* unrelated admin
+    message gets silently reinterpreted as new option text/date. Returns
+    True only if both steps succeeded.
+    """
+    ok = True
+    try:
+        await _refresh_poll_message(bot, poll, poll_options, counts)
+    except Exception:
+        logger.exception("Failed to refresh poll message for poll %s", poll.id)
+        ok = False
+
+    if voters and notification_text is not None:
+        try:
+            await bot.send_message(chat_id=poll.chat_id, text=notification_text)
+        except Exception:
+            logger.exception("Failed to notify voters for poll %s", poll.id)
+            ok = False
+
+    return ok
 
 
 async def _refresh_poll_message(bot: Bot, poll: Poll, poll_options, counts: dict[int, int]) -> None:
