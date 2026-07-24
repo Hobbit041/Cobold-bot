@@ -7,7 +7,7 @@ from aiogram.types import CallbackQuery
 from sqlalchemy.exc import IntegrityError
 
 from bot import formatting, keyboards, repo, threshold_logic
-from bot.scheduler import cancel_threshold_check, schedule_threshold_check
+from bot.scheduler import cancel_threshold_check, schedule_threshold_check, threshold_job_id
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,8 @@ async def handle_vote_toggle(
         # a response below.
         logger.exception("Failed to refresh poll message for poll %s", poll.id)
 
-    action = threshold_logic.decide_action_after_vote_change(new_count, announced)
+    timer_pending = scheduler.get_job(threshold_job_id(option_id)) is not None
+    action = threshold_logic.decide_action_after_vote_change(new_count, announced, timer_pending)
 
     if action == threshold_logic.SCHEDULE_TIMER:
         schedule_threshold_check(

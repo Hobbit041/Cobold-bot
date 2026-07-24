@@ -66,12 +66,14 @@ async def check_threshold(option_id: int) -> None:
             poll = await repo.get_poll(session, option.poll_id)
             chat_id = poll.chat_id
             option_text = option.text
+            option_date = option.date
 
         # Send before persisting `announced`, so a failed send leaves the
         # option eligible to be re-announced on a future vote instead of
         # silently marking it announced when the chat never saw the message.
         await bot.send_message(
-            chat_id=chat_id, text=formatting.threshold_reached_text(admin_mention, option_text)
+            chat_id=chat_id,
+            text=formatting.threshold_reached_text(admin_mention, option_text, option_date),
         )
 
         async with session_maker() as session:

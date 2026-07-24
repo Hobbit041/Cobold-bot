@@ -275,3 +275,57 @@ async def test_handle_vote_toggle_uses_configured_debounce_seconds(tmp_path, ses
 
     next_run_time = scheduler.get_job(threshold_job_id(option.id)).next_run_time
     assert before + dt.timedelta(seconds=10) <= next_run_time <= after + dt.timedelta(seconds=10)
+
+
+async def test_handle_vote_toggle_does_not_reschedule_timer_on_extra_votes_past_threshold(
+    tmp_path, session_maker
+):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=100, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+        option = (await repo.get_poll_options(session, poll.id))[0]
+        for user_id in range(4):
+            await repo.toggle_vote(
+                session, option.id, user_id=user_id, username=f"u{user_id}", first_name=f"U{user_id}"
+            )
+
+    tz = ZoneInfo("Europe/Moscow")
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), tz)
+    fake_bot = AsyncMock()
+
+    # First crossing (3 -> 4 votes already happened in setup via repo directly,
+    # so this 5th vote is the one that pushes the handler's own decision logic
+    # through SCHEDULE_TIMER for the first time within the handler itself).
+    first_callback = FakeCallback(
+        data=f"vote:{option.id}", user=FakeUser(id=10, username="ten", first_name="Ten")
+    )
+    await handle_vote_toggle(
+        first_callback,
+        session_maker=session_maker,
+        scheduler=scheduler,
+        bot=fake_bot,
+        admin_mention="@admin",
+        threshold_check_callback=_noop_threshold_callback,
+        threshold_debounce_seconds=900,
+    )
+    first_run_time = scheduler.get_job(threshold_job_id(option.id)).next_run_time
+    assert first_run_time is not None
+
+    # A 6th voter piles on while the timer is already counting down.
+    second_callback = FakeCallback(
+        data=f"vote:{option.id}", user=FakeUser(id=11, username="eleven", first_name="Eleven")
+    )
+    await handle_vote_toggle(
+        second_callback,
+        session_maker=session_maker,
+        scheduler=scheduler,
+        bot=fake_bot,
+        admin_mention="@admin",
+        threshold_check_callback=_noop_threshold_callback,
+        threshold_debounce_seconds=900,
+    )
+    second_run_time = scheduler.get_job(threshold_job_id(option.id)).next_run_time
+
+    assert second_run_time == first_run_time

@@ -42,8 +42,8 @@ def test_poll_message_text_joins_lines():
 
 
 def test_threshold_reached_text():
-    text = threshold_reached_text("@admin", "24.07")
-    assert text == "@admin, за вариант «24.07» проголосовало 4 человека!"
+    text = threshold_reached_text("@admin", "24.07", dt.date(2026, 7, 24))
+    assert text == '@admin, за вариант "24.07 24 июля" достаточно голосов для брони!'
 
 
 def test_threshold_dropped_text():

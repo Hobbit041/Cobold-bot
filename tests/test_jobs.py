@@ -41,7 +41,9 @@ async def test_threshold_check_callback_announces_when_still_at_threshold(sessio
     jobs.configure(fake_bot, session_maker, admin_mention="@admin", timezone=ZoneInfo("Europe/Moscow"))
     await jobs.check_threshold(option.id)
 
-    assert fake_bot.sent_messages == [(555, "@admin, за вариант «24.07» проголосовало 4 человека!")]
+    assert fake_bot.sent_messages == [
+        (555, '@admin, за вариант "24.07 24 июля" достаточно голосов для брони!')
+    ]
 
     async with session_maker() as session:
         assert await repo.is_announced(session, option.id) is True

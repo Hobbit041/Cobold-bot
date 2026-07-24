@@ -29,8 +29,11 @@ def poll_message_text(title: str, option_lines: list[str]) -> str:
     return f"📅 {title}\n\n{body}"
 
 
-def threshold_reached_text(admin_mention: str, option_text: str) -> str:
-    return f"{admin_mention}, за вариант «{option_text}» проголосовало 4 человека!"
+def threshold_reached_text(admin_mention: str, option_text: str, option_date: dt.date) -> str:
+    return (
+        f'{admin_mention}, за вариант "{option_text} {format_date_ru(option_date)}" '
+        f"достаточно голосов для брони!"
+    )
 
 
 def threshold_dropped_text(option_text: str) -> str:
