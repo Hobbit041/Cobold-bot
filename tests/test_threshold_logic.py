@@ -22,6 +22,7 @@ def test_announced_dropping_below_threshold_announces_drop():
 
 def test_announced_staying_above_threshold_no_action():
     assert decide_action_after_vote_change(new_count=5, announced=True) == NO_ACTION
+    assert decide_action_after_vote_change(new_count=4, announced=True) == NO_ACTION
 
 
 def test_should_announce_on_timer_fire_true_when_still_at_threshold():
