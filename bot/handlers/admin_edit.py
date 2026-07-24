@@ -302,5 +302,7 @@ async def _refresh_poll_message(
         for i, opt in enumerate(poll_options)
     ]
     text = formatting.poll_message_text(poll.title, lines)
-    keyboard = keyboards.build_poll_keyboard([(opt.id, opt.text, counts[opt.id]) for opt in poll_options])
+    keyboard = keyboards.build_poll_keyboard(
+        [(opt.id, opt.text, opt.date, counts[opt.id]) for opt in poll_options]
+    )
     await bot.edit_message_text(chat_id=poll.chat_id, message_id=poll.message_id, text=text, reply_markup=keyboard)

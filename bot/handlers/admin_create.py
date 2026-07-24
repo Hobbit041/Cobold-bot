@@ -127,7 +127,7 @@ async def receive_target_chat(message: Message, state: FSMContext, bot: Bot, ses
             for i, opt in enumerate(poll_options)
         ]
         text = formatting.poll_message_text(title, lines)
-        keyboard = keyboards.build_poll_keyboard([(opt.id, opt.text, 0) for opt in poll_options])
+        keyboard = keyboards.build_poll_keyboard([(opt.id, opt.text, opt.date, 0) for opt in poll_options])
 
         try:
             sent = await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)

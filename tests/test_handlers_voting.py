@@ -118,7 +118,8 @@ async def test_handle_vote_toggle_dropping_below_threshold_sends_drop_message(tm
     )
 
     fake_bot.send_message.assert_awaited_once_with(
-        chat_id=100, text="За вариант «24.07» снова меньше 4х человек. Проголосуйте, а то игра отменится!"
+        chat_id=100,
+        text='За вариант "24.07 24 июля" снова меньше 4х человек. Проголосуйте, а то игра отменится!',
     )
     async with session_maker() as session:
         assert await repo.is_announced(session, option.id) is False

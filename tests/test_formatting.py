@@ -47,8 +47,10 @@ def test_threshold_reached_text():
 
 
 def test_threshold_dropped_text():
-    text = threshold_dropped_text("24.07")
-    assert text == "За вариант «24.07» снова меньше 4х человек. Проголосуйте, а то игра отменится!"
+    text = threshold_dropped_text("24.07", dt.date(2026, 7, 24))
+    assert text == (
+        'За вариант "24.07 24 июля" снова меньше 4х человек. Проголосуйте, а то игра отменится!'
+    )
 
 
 def test_option_deleted_notification_lists_voters():

@@ -36,8 +36,11 @@ def threshold_reached_text(admin_mention: str, option_text: str, option_date: dt
     )
 
 
-def threshold_dropped_text(option_text: str) -> str:
-    return f"За вариант «{option_text}» снова меньше 4х человек. Проголосуйте, а то игра отменится!"
+def threshold_dropped_text(option_text: str, option_date: dt.date) -> str:
+    return (
+        f'За вариант "{option_text} {format_date_ru(option_date)}" снова меньше 4х человек. '
+        f"Проголосуйте, а то игра отменится!"
+    )
 
 
 def option_deleted_notification(option_text: str, voter_mentions: list[str]) -> str:

@@ -61,6 +61,7 @@ async def handle_vote_toggle(
             for opt in poll_options
         }
         option_text = option.text
+        option_date = option.date
 
     lines = [
         formatting.format_option_line(
@@ -70,7 +71,7 @@ async def handle_vote_toggle(
     ]
     text = formatting.poll_message_text(poll.title, lines)
     keyboard = keyboards.build_poll_keyboard(
-        [(opt.id, opt.text, counts[opt.id]) for opt in poll_options]
+        [(opt.id, opt.text, opt.date, counts[opt.id]) for opt in poll_options]
     )
     try:
         await bot.edit_message_text(
@@ -95,7 +96,9 @@ async def handle_vote_toggle(
         async with session_maker() as session:
             await repo.set_announced(session, option_id, False)
         try:
-            await bot.send_message(chat_id=poll.chat_id, text=formatting.threshold_dropped_text(option_text))
+            await bot.send_message(
+                chat_id=poll.chat_id, text=formatting.threshold_dropped_text(option_text, option_date)
+            )
         except Exception:
             logger.exception("Failed to send threshold-drop message for option %s", option_id)
 
