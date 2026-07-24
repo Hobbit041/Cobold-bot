@@ -38,5 +38,15 @@ def test_parse_invalid_year_length_three_digit_raises():
         parse_date_input("24.07.026")
 
 
+def test_parse_non_numeric_year_raises():
+    with pytest.raises(DateParseError):
+        parse_date_input("24.07.ab")
+
+
+def test_parse_non_numeric_four_digit_year_raises():
+    with pytest.raises(DateParseError):
+        parse_date_input("24.07.abcd")
+
+
 def test_format_date_ru():
     assert format_date_ru(dt.date(2026, 7, 24)) == "24 июля"
