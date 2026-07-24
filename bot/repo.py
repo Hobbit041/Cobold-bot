@@ -132,3 +132,43 @@ async def delete_option(session: AsyncSession, option_id: int) -> None:
         await session.delete(reminder)
 
     await session.commit()
+
+
+# --- Threshold / reminder state ---------------------------------------------
+
+
+async def is_announced(session: AsyncSession, option_id: int) -> bool:
+    state = await session.get(ThresholdState, option_id)
+    return bool(state and state.announced)
+
+
+async def set_announced(session: AsyncSession, option_id: int, value: bool) -> None:
+    state = await session.get(ThresholdState, option_id)
+    state.announced = value
+    await session.commit()
+
+
+async def is_reminder_sent(session: AsyncSession, option_id: int) -> bool:
+    reminder = await session.get(Reminder, option_id)
+    return bool(reminder and reminder.sent)
+
+
+async def set_reminder_sent(session: AsyncSession, option_id: int, value: bool) -> None:
+    reminder = await session.get(Reminder, option_id)
+    reminder.sent = value
+    await session.commit()
+
+
+async def get_options_due_for_reminder(session: AsyncSession, target_date: dt.date) -> list[Option]:
+    result = await session.execute(
+        select(Option)
+        .join(ThresholdState, ThresholdState.option_id == Option.id)
+        .join(Reminder, Reminder.option_id == Option.id)
+        .where(
+            Option.date == target_date,
+            Option.is_deleted.is_(False),
+            ThresholdState.announced.is_(True),
+            Reminder.sent.is_(False),
+        )
+    )
+    return list(result.scalars().all())
