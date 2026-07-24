@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import logging
+from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
 from bot import formatting, repo, threshold_logic
@@ -9,8 +11,49 @@ from bot import formatting, repo, threshold_logic
 logger = logging.getLogger(__name__)
 
 
-def make_threshold_check_callback(bot, session_maker, admin_mention: str):
-    async def check_threshold(option_id: int) -> None:
+@dataclass
+class _Context:
+    bot: object = None
+    session_maker: object = None
+    admin_mention: str = ""
+    timezone: ZoneInfo | None = None
+
+
+_context = _Context()
+
+# Tasks currently executing check_threshold/send_due_reminders. main.py awaits
+# these before disposing the DB engine on shutdown, since APScheduler's
+# AsyncIOExecutor cancels in-flight coroutine jobs rather than waiting for
+# them despite the scheduler's wait=True default.
+in_flight_jobs: set[asyncio.Task] = set()
+
+
+def configure(bot, session_maker, admin_mention: str, timezone: ZoneInfo) -> None:
+    """Set the bot/session_maker/config used by the module-level job callbacks below.
+
+    Must be called once at startup before scheduling any job that references
+    check_threshold or send_due_reminders. These callbacks are deliberately
+    plain module-level functions, not closures returned by a factory: APScheduler's
+    SQLAlchemyJobStore persists jobs by pickling a reference to the callable (plus
+    any bound `self`), and neither a nested closure nor an aiogram Bot/DB session
+    factory baked into one is something that reference can resolve or that should
+    be pickled. Reading shared state from this module-level context instead keeps
+    the scheduled callables trivially picklable by qualified name.
+    """
+    _context.bot = bot
+    _context.session_maker = session_maker
+    _context.admin_mention = admin_mention
+    _context.timezone = timezone
+
+
+async def check_threshold(option_id: int) -> None:
+    task = asyncio.current_task()
+    in_flight_jobs.add(task)
+    try:
+        bot = _context.bot
+        session_maker = _context.session_maker
+        admin_mention = _context.admin_mention
+
         async with session_maker() as session:
             option = await session.get(repo.Option, option_id)
             if option is None or option.is_deleted:
@@ -33,12 +76,18 @@ def make_threshold_check_callback(bot, session_maker, admin_mention: str):
 
         async with session_maker() as session:
             await repo.set_announced(session, option_id, True)
+    finally:
+        in_flight_jobs.discard(task)
 
-    return check_threshold
 
+async def send_due_reminders() -> None:
+    task = asyncio.current_task()
+    in_flight_jobs.add(task)
+    try:
+        bot = _context.bot
+        session_maker = _context.session_maker
+        timezone = _context.timezone
 
-def make_daily_reminder_callback(bot, session_maker, timezone: ZoneInfo):
-    async def send_due_reminders() -> None:
         today = dt.datetime.now(timezone).date()
         tomorrow = today + dt.timedelta(days=1)
 
@@ -60,5 +109,5 @@ def make_daily_reminder_callback(bot, session_maker, timezone: ZoneInfo):
 
             async with session_maker() as session:
                 await repo.set_reminder_sent(session, option_id, True)
-
-    return send_due_reminders
+    finally:
+        in_flight_jobs.discard(task)
