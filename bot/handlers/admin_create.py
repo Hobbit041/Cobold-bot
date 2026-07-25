@@ -17,6 +17,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 
 from bot import date_utils, formatting, keyboards, repo
+from bot.handlers.dialog_cleanup import cleanup_and_answer
 
 router = Router(name="admin_create")
 
@@ -37,46 +38,67 @@ def _is_admin(message: Message, admin_id: int) -> bool:
 @router.message(Command("newpoll"))
 async def start_create_poll(message: Message, state: FSMContext, admin_id: int) -> None:
     if not _is_admin(message, admin_id):
-        await message.answer("Эта команда доступна только администратору.")
+        await cleanup_and_answer(message, state, "Эта команда доступна только администратору.")
         return
 
     await state.set_state(CreatePollStates.waiting_title)
-    await state.update_data(options=[])
-    await message.answer("Введите название опроса:")
+    data = {"options": []}
+    if message.chat.type != "private":
+        # /newpoll was run directly in the target chat -- no need to ask
+        # for it later. Also remember the forum topic (if any): posting a
+        # NEW message into a forum-enabled group without message_thread_id
+        # lands it in "General" instead of the topic the admin is in.
+        data["target_chat_id"] = message.chat.id
+        data["target_message_thread_id"] = message.message_thread_id
+    await state.update_data(**data)
+    await cleanup_and_answer(message, state, "Введите название опроса:")
 
 
 @router.message(CreatePollStates.waiting_title)
 async def receive_title(message: Message, state: FSMContext) -> None:
     if not message.text:
-        await message.answer("Пожалуйста, отправьте текстовое название.")
+        await cleanup_and_answer(message, state, "Пожалуйста, отправьте текстовое название.")
         return
 
     await state.update_data(title=message.text)
     await state.set_state(CreatePollStates.waiting_options)
-    await message.answer(
+    await cleanup_and_answer(
+        message,
+        state,
         "Теперь добавляйте варианты по одному в формате:\n"
         "Текст | ДД.ММ.ГГГГ (вместо | подойдёт и / или \\)\n"
-        "Когда закончите — отправьте /done"
+        "Когда закончите — отправьте /done",
     )
 
 
 @router.message(CreatePollStates.waiting_options, Command("done"))
-async def finish_options(message: Message, state: FSMContext) -> None:
+async def finish_options(message: Message, state: FSMContext, bot: Bot, session_maker) -> None:
     data = await state.get_data()
     options = data.get("options", [])
     if not options:
-        await message.answer("Нужно добавить хотя бы один вариант перед /done.")
+        await cleanup_and_answer(message, state, "Нужно добавить хотя бы один вариант перед /done.")
+        return
+
+    target_chat_id = data.get("target_chat_id")
+    if target_chat_id is not None:
+        await _create_and_publish_poll(
+            message, state, bot, session_maker, target_chat_id, data.get("target_message_thread_id")
+        )
         return
 
     await state.set_state(CreatePollStates.waiting_chat)
-    await message.answer("Перешлите любое сообщение из целевого чата, либо пришлите его chat id.")
+    await cleanup_and_answer(
+        message, state, "Перешлите любое сообщение из целевого чата, либо пришлите его chat id."
+    )
 
 
 @router.message(CreatePollStates.waiting_options)
 async def receive_option(message: Message, state: FSMContext) -> None:
     match = _OPTION_SEPARATOR_PATTERN.search(message.text) if message.text else None
     if not match:
-        await message.answer("Формат: Текст | ДД.ММ.ГГГГ (вместо | подойдёт и / или \\). Попробуйте снова.")
+        await cleanup_and_answer(
+            message, state, "Формат: Текст | ДД.ММ.ГГГГ (вместо | подойдёт и / или \\). Попробуйте снова."
+        )
         return
 
     text_part = message.text[: match.start()]
@@ -85,15 +107,17 @@ async def receive_option(message: Message, state: FSMContext) -> None:
     try:
         parsed_date = date_utils.parse_date_input(date_part.strip())
     except date_utils.DateParseError as exc:
-        await message.answer(str(exc))
+        await cleanup_and_answer(message, state, str(exc))
         return
 
     data = await state.get_data()
     options = data.get("options", [])
     options.append({"text": text_part, "date": parsed_date.isoformat()})
     await state.update_data(options=options)
-    await message.answer(
-        f"Добавлено: {text_part} ({date_utils.format_date_ru(parsed_date)}). Ещё вариант или /done."
+    await cleanup_and_answer(
+        message,
+        state,
+        f"Добавлено: {text_part} ({date_utils.format_date_ru(parsed_date)}). Ещё вариант или /done.",
     )
 
 
@@ -112,15 +136,34 @@ async def receive_target_chat(message: Message, state: FSMContext, bot: Bot, ses
             chat_id = None
 
     if chat_id is None:
-        await message.answer("Не удалось определить чат. Перешлите сообщение из чата или пришлите его id.")
+        await cleanup_and_answer(
+            message, state, "Не удалось определить чат. Перешлите сообщение из чата или пришлите его id."
+        )
         return
 
+    await _create_and_publish_poll(message, state, bot, session_maker, chat_id)
+
+
+async def _create_and_publish_poll(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    session_maker,
+    chat_id: int,
+    message_thread_id: int | None = None,
+) -> None:
     data = await state.get_data()
     title = data["title"]
     options = [(opt["text"], dt.date.fromisoformat(opt["date"])) for opt in data["options"]]
 
     async with session_maker() as session:
-        poll = await repo.create_poll(session, chat_id=chat_id, title=title, options=options)
+        poll = await repo.create_poll(
+            session,
+            chat_id=chat_id,
+            title=title,
+            options=options,
+            message_thread_id=message_thread_id,
+        )
         poll_options = await repo.get_poll_options(session, poll.id)
         lines = [
             formatting.format_option_line(i + 1, opt.text, opt.date, 0)
@@ -130,17 +173,29 @@ async def receive_target_chat(message: Message, state: FSMContext, bot: Bot, ses
         keyboard = keyboards.build_poll_keyboard([(opt.id, opt.text, opt.date, 0) for opt in poll_options])
 
         try:
-            sent = await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
+            sent = await bot.send_message(
+                chat_id=chat_id, text=text, reply_markup=keyboard, message_thread_id=message_thread_id
+            )
         except Exception:
             await session.delete(poll)
             await session.commit()
-            await message.answer(
-                "Не удалось отправить опрос в этот чат. Проверьте, что бот добавлен в чат "
-                "и id указан верно, затем пришлите чат ещё раз."
-            )
+            if message.chat.type == "private":
+                await cleanup_and_answer(
+                    message,
+                    state,
+                    "Не удалось отправить опрос в этот чат. Проверьте, что бот добавлен в чат "
+                    "и id указан верно, затем пришлите чат ещё раз.",
+                )
+            else:
+                await cleanup_and_answer(
+                    message,
+                    state,
+                    "Не удалось опубликовать опрос в этом чате. Проверьте, что у бота есть права "
+                    "отправлять сообщения, и повторите /done.",
+                )
             return
 
         await repo.set_poll_message(session, poll.id, sent.message_id)
 
     await state.clear()
-    await message.answer("Опрос создан и опубликован!")
+    await cleanup_and_answer(message, state, "Опрос создан и опубликован!")
