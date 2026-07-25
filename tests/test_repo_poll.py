@@ -28,3 +28,25 @@ async def test_set_poll_message_stores_message_id(session_maker):
 
         stored = await repo.get_poll(session, poll.id)
         assert stored.message_id == 555
+
+
+async def test_create_poll_defaults_message_thread_id_to_none(session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=100, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+
+        assert poll.message_thread_id is None
+
+
+async def test_create_poll_stores_message_thread_id(session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session,
+            chat_id=100,
+            title="Игра",
+            options=[("24.07", dt.date(2026, 7, 24))],
+            message_thread_id=42,
+        )
+
+        assert poll.message_thread_id == 42

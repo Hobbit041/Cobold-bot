@@ -21,8 +21,9 @@ async def create_poll(
     chat_id: int,
     title: str,
     options: list[tuple[str, dt.date]],
+    message_thread_id: int | None = None,
 ) -> Poll:
-    poll = Poll(chat_id=chat_id, title=title, status="active")
+    poll = Poll(chat_id=chat_id, title=title, status="active", message_thread_id=message_thread_id)
     session.add(poll)
     await session.flush()
 

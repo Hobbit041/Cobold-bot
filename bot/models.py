@@ -16,6 +16,7 @@ class Poll(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     chat_id: Mapped[int]
     message_id: Mapped[int | None] = mapped_column(default=None)
+    message_thread_id: Mapped[int | None] = mapped_column(default=None)
     title: Mapped[str]
     status: Mapped[str] = mapped_column(default="active")
     created_at: Mapped[dt.datetime] = mapped_column(default=dt.datetime.utcnow)
