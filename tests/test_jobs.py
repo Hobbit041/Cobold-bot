@@ -2,15 +2,24 @@ import asyncio
 import datetime as dt
 from zoneinfo import ZoneInfo
 
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.base import StorageKey
+from aiogram.fsm.storage.memory import MemoryStorage
+
 from bot import jobs, repo
 
 
 class FakeBot:
-    def __init__(self):
+    def __init__(self, id=1):
+        self.id = id
         self.sent_messages = []
+        self.deleted_messages = []
 
     async def send_message(self, chat_id, text, message_thread_id=None):
         self.sent_messages.append((chat_id, text, message_thread_id))
+
+    async def delete_message(self, chat_id, message_id):
+        self.deleted_messages.append((chat_id, message_id))
 
 
 class FailingFakeBot:
@@ -207,6 +216,48 @@ async def test_check_threshold_is_module_level_and_pickleable_by_reference():
     """
     assert jobs.check_threshold.__qualname__ == "check_threshold"
     assert jobs.send_due_reminders.__qualname__ == "send_due_reminders"
+
+
+async def test_expire_dialog_clears_active_state_and_notifies(session_maker):
+    storage = MemoryStorage()
+    key = StorageKey(bot_id=1, chat_id=-100, user_id=1)
+    state = FSMContext(storage=storage, key=key)
+    await state.set_state("CreatePollStates:waiting_title")
+    await state.update_data(last_bot_message_id=555)
+
+    fake_bot = FakeBot(id=1)
+    jobs.configure(
+        fake_bot, session_maker, admin_mention="@admin", timezone=ZoneInfo("Europe/Moscow"), storage=storage
+    )
+
+    await jobs.expire_dialog(-100, 1, 42)
+
+    assert await state.get_state() is None
+    assert fake_bot.deleted_messages == [(-100, 555)]
+    assert len(fake_bot.sent_messages) == 1
+    chat_id, text, message_thread_id = fake_bot.sent_messages[0]
+    assert chat_id == -100
+    assert message_thread_id == 42
+    assert "отмен" in text.lower()
+
+
+async def test_expire_dialog_noop_when_state_already_cleared(session_maker):
+    storage = MemoryStorage()
+    key = StorageKey(bot_id=1, chat_id=-100, user_id=1)
+
+    fake_bot = FakeBot(id=1)
+    jobs.configure(
+        fake_bot, session_maker, admin_mention="@admin", timezone=ZoneInfo("Europe/Moscow"), storage=storage
+    )
+
+    await jobs.expire_dialog(-100, 1, None)
+
+    assert fake_bot.sent_messages == []
+    assert fake_bot.deleted_messages == []
+
+
+async def test_expire_dialog_is_module_level_and_pickleable_by_reference():
+    assert jobs.expire_dialog.__qualname__ == "expire_dialog"
 
 
 async def test_check_threshold_tracks_itself_in_in_flight_jobs_while_running(session_maker):

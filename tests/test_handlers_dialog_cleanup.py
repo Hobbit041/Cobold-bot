@@ -1,10 +1,12 @@
 from unittest.mock import AsyncMock
+from zoneinfo import ZoneInfo
 
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.handlers.dialog_cleanup import cleanup_and_answer
+from bot.scheduler import create_scheduler, dialog_timeout_job_id
 
 
 class FakeChat:
@@ -14,9 +16,11 @@ class FakeChat:
 
 
 class FakeMessage:
-    def __init__(self, chat_type="private", chat_id=1, message_id=10):
+    def __init__(self, chat_type="private", chat_id=1, message_id=10, user_id=1, message_thread_id=None):
         self.chat = FakeChat(chat_id, chat_type)
         self.message_id = message_id
+        self.message_thread_id = message_thread_id
+        self.from_user = type("U", (), {"id": user_id})()
         self.answer = AsyncMock()
         self.delete = AsyncMock()
         self.bot = AsyncMock()
@@ -26,6 +30,10 @@ def _state():
     storage = MemoryStorage()
     key = StorageKey(bot_id=1, chat_id=1, user_id=1)
     return FSMContext(storage=storage, key=key)
+
+
+def _scheduler(tmp_path):
+    return create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
 
 
 async def test_private_chat_just_answers_without_deleting_anything():
@@ -83,3 +91,44 @@ async def test_group_chat_survives_delete_failures():
 
     message.answer.assert_awaited_once_with("still works")
     assert result is sent
+
+
+async def test_group_chat_schedules_dialog_timeout_when_state_active(tmp_path):
+    message = FakeMessage(chat_type="group", chat_id=-100, message_id=60, user_id=7, message_thread_id=42)
+    state = _state()
+    await state.set_state("CreatePollStates:waiting_title")
+    scheduler = _scheduler(tmp_path)
+
+    await cleanup_and_answer(message, state, "hello", scheduler=scheduler)
+
+    job = scheduler.get_job(dialog_timeout_job_id(-100, 7))
+    assert job is not None
+    assert job.args == (-100, 7, 42)
+
+
+def _noop_dialog_timeout(chat_id, user_id, message_thread_id):
+    pass
+
+
+async def test_group_chat_cancels_dialog_timeout_when_state_cleared(tmp_path):
+    message = FakeMessage(chat_type="group", chat_id=-100, message_id=61, user_id=7)
+    state = _state()
+    scheduler = _scheduler(tmp_path)
+    # Simulate a timeout already pending from a previous step in this dialog.
+    from bot.scheduler import schedule_dialog_timeout
+
+    schedule_dialog_timeout(scheduler, -100, 7, None, callback=_noop_dialog_timeout)
+
+    await cleanup_and_answer(message, state, "done", scheduler=scheduler)
+
+    assert scheduler.get_job(dialog_timeout_job_id(-100, 7)) is None
+
+
+async def test_group_chat_without_scheduler_does_not_error(tmp_path):
+    message = FakeMessage(chat_type="group", chat_id=-100, message_id=62)
+    state = _state()
+    await state.set_state("CreatePollStates:waiting_title")
+
+    result = await cleanup_and_answer(message, state, "hello")
+
+    assert result is message.answer.return_value

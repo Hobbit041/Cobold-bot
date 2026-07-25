@@ -16,7 +16,7 @@ from bot.handlers.admin_edit import (
     select_poll,
     start_edit_poll,
 )
-from bot.scheduler import create_scheduler
+from bot.scheduler import create_scheduler, dialog_timeout_job_id
 
 
 class FakeChat:
@@ -26,11 +26,12 @@ class FakeChat:
 
 
 class FakeMessage:
-    def __init__(self, text, user_id=1, chat_type="private", chat_id=1, message_id=10):
+    def __init__(self, text, user_id=1, chat_type="private", chat_id=1, message_id=10, message_thread_id=None):
         self.text = text
         self.from_user = type("U", (), {"id": user_id})()
         self.chat = FakeChat(chat_id, chat_type)
         self.message_id = message_id
+        self.message_thread_id = message_thread_id
         self.answer = AsyncMock()
         self.delete = AsyncMock()
         self.bot = AsyncMock()
@@ -281,3 +282,32 @@ async def test_apply_new_text_notification_uses_poll_message_thread_id(tmp_path,
     await apply_new_text(FakeMessage("24.07 (в 19:00)"), state, bot=fake_bot, session_maker=session_maker)
 
     assert fake_bot.send_message.await_args.kwargs["message_thread_id"] == 42
+
+
+async def test_editpoll_in_group_arms_idle_timeout_and_clears_it_on_finish(tmp_path, session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(session, chat_id=-500, title="Игра", options=[("24.07", dt.date(2026, 7, 24))])
+        await repo.set_poll_message(session, poll.id, message_id=42)
+
+    state = _state()
+    fake_bot = AsyncMock()
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
+
+    start_message = FakeMessage("/editpoll", user_id=3, chat_type="group", chat_id=-500, message_id=1)
+    await start_edit_poll(start_message, state, admin_id=3, session_maker=session_maker, scheduler=scheduler)
+    assert scheduler.get_job(dialog_timeout_job_id(-500, 3)) is not None
+
+    poll_message = FakeMessage("1", user_id=3, chat_type="group", chat_id=-500, message_id=2)
+    await select_poll(poll_message, state, session_maker=session_maker, scheduler=scheduler)
+    assert scheduler.get_job(dialog_timeout_job_id(-500, 3)) is not None
+
+    option_message = FakeMessage("1", user_id=3, chat_type="group", chat_id=-500, message_id=3)
+    await select_option(option_message, state, scheduler=scheduler)
+
+    action_message = FakeMessage("delete", user_id=3, chat_type="group", chat_id=-500, message_id=4)
+    await select_action(
+        action_message, state, bot=fake_bot, session_maker=session_maker, scheduler=scheduler
+    )
+
+    assert await state.get_state() is None
+    assert scheduler.get_job(dialog_timeout_job_id(-500, 3)) is None

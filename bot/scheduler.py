@@ -81,3 +81,31 @@ def schedule_daily_reminder_job(scheduler: AsyncIOScheduler, callback, hour: int
         id="daily_reminder_check",
         replace_existing=True,
     )
+
+
+def dialog_timeout_job_id(chat_id: int, user_id: int) -> str:
+    return f"dialog_timeout:{chat_id}:{user_id}"
+
+
+def schedule_dialog_timeout(
+    scheduler: AsyncIOScheduler,
+    chat_id: int,
+    user_id: int,
+    message_thread_id: int | None,
+    callback,
+    delay_seconds: int = 300,
+) -> None:
+    run_date = dt.datetime.now(scheduler.timezone) + dt.timedelta(seconds=delay_seconds)
+    scheduler.add_job(
+        callback,
+        trigger=DateTrigger(run_date=run_date),
+        args=[chat_id, user_id, message_thread_id],
+        id=dialog_timeout_job_id(chat_id, user_id),
+        replace_existing=True,
+    )
+
+
+def cancel_dialog_timeout(scheduler: AsyncIOScheduler, chat_id: int, user_id: int) -> None:
+    job_id = dialog_timeout_job_id(chat_id, user_id)
+    if scheduler.get_job(job_id):
+        scheduler.remove_job(job_id)

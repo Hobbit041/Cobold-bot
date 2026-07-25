@@ -45,9 +45,13 @@ def _is_admin(message: Message, admin_id: int) -> bool:
 
 
 @router.message(Command("editpoll"))
-async def start_edit_poll(message: Message, state: FSMContext, admin_id: int, session_maker) -> None:
+async def start_edit_poll(
+    message: Message, state: FSMContext, admin_id: int, session_maker, scheduler=None
+) -> None:
     if not _is_admin(message, admin_id):
-        await cleanup_and_answer(message, state, "Эта команда доступна только администратору.")
+        await cleanup_and_answer(
+            message, state, "Эта команда доступна только администратору.", scheduler=scheduler
+        )
         return
 
     async with session_maker() as session:
@@ -55,24 +59,28 @@ async def start_edit_poll(message: Message, state: FSMContext, admin_id: int, se
         polls = list(result.scalars().all())
 
     if not polls:
-        await cleanup_and_answer(message, state, "Активных опросов нет.")
+        await cleanup_and_answer(message, state, "Активных опросов нет.", scheduler=scheduler)
         return
 
     lines = [f"{i + 1}. {poll.title} (id={poll.id})" for i, poll in enumerate(polls)]
     await state.update_data(poll_ids=[poll.id for poll in polls])
     await state.set_state(EditPollStates.waiting_poll_selection)
-    await cleanup_and_answer(message, state, "Выберите опрос по номеру:\n" + "\n".join(lines))
+    await cleanup_and_answer(
+        message, state, "Выберите опрос по номеру:\n" + "\n".join(lines), scheduler=scheduler
+    )
 
 
 @router.message(EditPollStates.waiting_poll_selection)
-async def select_poll(message: Message, state: FSMContext, session_maker) -> None:
+async def select_poll(message: Message, state: FSMContext, session_maker, scheduler=None) -> None:
     data = await state.get_data()
     poll_ids = data["poll_ids"]
     try:
         index = int(message.text.strip()) - 1
         poll_id = poll_ids[index]
     except (ValueError, IndexError, AttributeError):
-        await cleanup_and_answer(message, state, "Некорректный номер. Попробуйте снова.")
+        await cleanup_and_answer(
+            message, state, "Некорректный номер. Попробуйте снова.", scheduler=scheduler
+        )
         return
 
     async with session_maker() as session:
@@ -81,52 +89,62 @@ async def select_poll(message: Message, state: FSMContext, session_maker) -> Non
     lines = [f"{i + 1}. {opt.text} ({date_utils.format_date_ru(opt.date)})" for i, opt in enumerate(options)]
     await state.update_data(poll_id=poll_id, option_ids=[opt.id for opt in options])
     await state.set_state(EditPollStates.waiting_option_selection)
-    await cleanup_and_answer(message, state, "Выберите вариант по номеру:\n" + "\n".join(lines))
+    await cleanup_and_answer(
+        message, state, "Выберите вариант по номеру:\n" + "\n".join(lines), scheduler=scheduler
+    )
 
 
 @router.message(EditPollStates.waiting_option_selection)
-async def select_option(message: Message, state: FSMContext) -> None:
+async def select_option(message: Message, state: FSMContext, scheduler=None) -> None:
     data = await state.get_data()
     option_ids = data["option_ids"]
     try:
         index = int(message.text.strip()) - 1
         option_id = option_ids[index]
     except (ValueError, IndexError, AttributeError):
-        await cleanup_and_answer(message, state, "Некорректный номер. Попробуйте снова.")
+        await cleanup_and_answer(
+            message, state, "Некорректный номер. Попробуйте снова.", scheduler=scheduler
+        )
         return
 
     await state.update_data(option_id=option_id)
     await state.set_state(EditPollStates.waiting_action)
-    await cleanup_and_answer(message, state, "Что сделать с вариантом? Ответьте: text / date / delete")
+    await cleanup_and_answer(
+        message, state, "Что сделать с вариантом? Ответьте: text / date / delete", scheduler=scheduler
+    )
 
 
 @router.message(EditPollStates.waiting_action)
-async def select_action(message: Message, state: FSMContext, bot: Bot, session_maker, scheduler) -> None:
+async def select_action(
+    message: Message, state: FSMContext, bot: Bot, session_maker, scheduler=None
+) -> None:
     action = (message.text or "").strip().lower()
     data = await state.get_data()
     option_id = data["option_id"]
 
     if action == "text":
         await state.set_state(EditPollStates.waiting_new_text)
-        await cleanup_and_answer(message, state, "Введите новый текст варианта:")
+        await cleanup_and_answer(message, state, "Введите новый текст варианта:", scheduler=scheduler)
         return
 
     if action == "date":
         await state.set_state(EditPollStates.waiting_new_date)
-        await cleanup_and_answer(message, state, "Введите новую дату (ДД.ММ.ГГГГ):")
+        await cleanup_and_answer(message, state, "Введите новую дату (ДД.ММ.ГГГГ):", scheduler=scheduler)
         return
 
     if action == "delete":
         await _apply_delete(message, state, bot, session_maker, scheduler, option_id)
         return
 
-    await cleanup_and_answer(message, state, "Не понял. Ответьте: text / date / delete")
+    await cleanup_and_answer(
+        message, state, "Не понял. Ответьте: text / date / delete", scheduler=scheduler
+    )
 
 
 @router.message(EditPollStates.waiting_new_text)
-async def apply_new_text(message: Message, state: FSMContext, bot: Bot, session_maker) -> None:
+async def apply_new_text(message: Message, state: FSMContext, bot: Bot, session_maker, scheduler=None) -> None:
     if not message.text:
-        await cleanup_and_answer(message, state, "Пожалуйста, отправьте текст.")
+        await cleanup_and_answer(message, state, "Пожалуйста, отправьте текст.", scheduler=scheduler)
         return
 
     data = await state.get_data()
@@ -137,7 +155,7 @@ async def apply_new_text(message: Message, state: FSMContext, bot: Bot, session_
         option = await session.get(repo.Option, option_id)
         if option is None:
             await state.clear()
-            await cleanup_and_answer(message, state, _OPTION_GONE_MESSAGE)
+            await cleanup_and_answer(message, state, _OPTION_GONE_MESSAGE, scheduler=scheduler)
             return
 
         old_text = option.text
@@ -164,13 +182,15 @@ async def apply_new_text(message: Message, state: FSMContext, bot: Bot, session_
     )
 
     await state.clear()
-    await cleanup_and_answer(message, state, "Вариант обновлён." if success else _PARTIAL_FAILURE_MESSAGE)
+    await cleanup_and_answer(
+        message, state, "Вариант обновлён." if success else _PARTIAL_FAILURE_MESSAGE, scheduler=scheduler
+    )
 
 
 @router.message(EditPollStates.waiting_new_date)
-async def apply_new_date(message: Message, state: FSMContext, bot: Bot, session_maker) -> None:
+async def apply_new_date(message: Message, state: FSMContext, bot: Bot, session_maker, scheduler=None) -> None:
     if not message.text:
-        await cleanup_and_answer(message, state, "Пожалуйста, отправьте дату.")
+        await cleanup_and_answer(message, state, "Пожалуйста, отправьте дату.", scheduler=scheduler)
         return
 
     data = await state.get_data()
@@ -179,14 +199,14 @@ async def apply_new_date(message: Message, state: FSMContext, bot: Bot, session_
     try:
         new_date = date_utils.parse_date_input(message.text.strip())
     except date_utils.DateParseError as exc:
-        await cleanup_and_answer(message, state, str(exc))
+        await cleanup_and_answer(message, state, str(exc), scheduler=scheduler)
         return
 
     async with session_maker() as session:
         option = await session.get(repo.Option, option_id)
         if option is None:
             await state.clear()
-            await cleanup_and_answer(message, state, _OPTION_GONE_MESSAGE)
+            await cleanup_and_answer(message, state, _OPTION_GONE_MESSAGE, scheduler=scheduler)
             return
 
         old_date = option.date
@@ -213,7 +233,12 @@ async def apply_new_date(message: Message, state: FSMContext, bot: Bot, session_
     )
 
     await state.clear()
-    await cleanup_and_answer(message, state, "Дата варианта обновлена." if success else _PARTIAL_FAILURE_MESSAGE)
+    await cleanup_and_answer(
+        message,
+        state,
+        "Дата варианта обновлена." if success else _PARTIAL_FAILURE_MESSAGE,
+        scheduler=scheduler,
+    )
 
 
 async def _apply_delete(message: Message, state: FSMContext, bot: Bot, session_maker, scheduler, option_id: int) -> None:
@@ -221,7 +246,7 @@ async def _apply_delete(message: Message, state: FSMContext, bot: Bot, session_m
         option = await session.get(repo.Option, option_id)
         if option is None:
             await state.clear()
-            await cleanup_and_answer(message, state, _OPTION_GONE_MESSAGE)
+            await cleanup_and_answer(message, state, _OPTION_GONE_MESSAGE, scheduler=scheduler)
             return
 
         option_text = option.text
@@ -250,7 +275,9 @@ async def _apply_delete(message: Message, state: FSMContext, bot: Bot, session_m
     )
 
     await state.clear()
-    await cleanup_and_answer(message, state, "Вариант удалён." if success else _PARTIAL_FAILURE_MESSAGE)
+    await cleanup_and_answer(
+        message, state, "Вариант удалён." if success else _PARTIAL_FAILURE_MESSAGE, scheduler=scheduler
+    )
 
 
 async def _refresh_and_notify(

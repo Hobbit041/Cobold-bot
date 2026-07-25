@@ -1,4 +1,5 @@
 from unittest.mock import AsyncMock
+from zoneinfo import ZoneInfo
 
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
@@ -14,6 +15,7 @@ from bot.handlers.admin_create import (
     start_create_poll,
 )
 from bot.models import Poll
+from bot.scheduler import create_scheduler, dialog_timeout_job_id
 
 
 class FakeChat:
@@ -262,3 +264,24 @@ async def test_newpoll_started_in_group_deletes_admin_messages_and_previous_prom
     title_message.delete.assert_awaited_once()
     # Deletes the bot's previous prompt ("Введите название опроса:") too.
     title_message.bot.delete_message.assert_awaited_once()
+
+
+async def test_newpoll_in_group_arms_idle_timeout_and_clears_it_on_finish(session_maker, tmp_path):
+    state = _state()
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
+    fake_bot = AsyncMock()
+    fake_bot.send_message.return_value = type("Sent", (), {"message_id": 780})()
+
+    start_message = FakeMessage("/newpoll", user_id=9, chat_type="supergroup", chat_id=-600)
+    await start_create_poll(start_message, state, admin_id=9, scheduler=scheduler)
+    assert scheduler.get_job(dialog_timeout_job_id(-600, 9)) is not None
+
+    await receive_title(FakeMessage("Игра", user_id=9, chat_type="supergroup", chat_id=-600), state, scheduler=scheduler)
+    await receive_option(
+        FakeMessage("24.07 | 24.07.2026", user_id=9, chat_type="supergroup", chat_id=-600), state, scheduler=scheduler
+    )
+    done_message = FakeMessage("/done", user_id=9, chat_type="supergroup", chat_id=-600)
+    await finish_options(done_message, state, bot=fake_bot, session_maker=session_maker, scheduler=scheduler)
+
+    assert await state.get_state() is None
+    assert scheduler.get_job(dialog_timeout_job_id(-600, 9)) is None

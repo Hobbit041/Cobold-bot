@@ -36,9 +36,11 @@ def _is_admin(message: Message, admin_id: int) -> bool:
 
 
 @router.message(Command("newpoll"))
-async def start_create_poll(message: Message, state: FSMContext, admin_id: int) -> None:
+async def start_create_poll(message: Message, state: FSMContext, admin_id: int, scheduler=None) -> None:
     if not _is_admin(message, admin_id):
-        await cleanup_and_answer(message, state, "Эта команда доступна только администратору.")
+        await cleanup_and_answer(
+            message, state, "Эта команда доступна только администратору.", scheduler=scheduler
+        )
         return
 
     await state.set_state(CreatePollStates.waiting_title)
@@ -51,13 +53,15 @@ async def start_create_poll(message: Message, state: FSMContext, admin_id: int) 
         data["target_chat_id"] = message.chat.id
         data["target_message_thread_id"] = message.message_thread_id
     await state.update_data(**data)
-    await cleanup_and_answer(message, state, "Введите название опроса:")
+    await cleanup_and_answer(message, state, "Введите название опроса:", scheduler=scheduler)
 
 
 @router.message(CreatePollStates.waiting_title)
-async def receive_title(message: Message, state: FSMContext) -> None:
+async def receive_title(message: Message, state: FSMContext, scheduler=None) -> None:
     if not message.text:
-        await cleanup_and_answer(message, state, "Пожалуйста, отправьте текстовое название.")
+        await cleanup_and_answer(
+            message, state, "Пожалуйста, отправьте текстовое название.", scheduler=scheduler
+        )
         return
 
     await state.update_data(title=message.text)
@@ -68,36 +72,51 @@ async def receive_title(message: Message, state: FSMContext) -> None:
         "Теперь добавляйте варианты по одному в формате:\n"
         "Текст | ДД.ММ.ГГГГ (вместо | подойдёт и / или \\)\n"
         "Когда закончите — отправьте /done",
+        scheduler=scheduler,
     )
 
 
 @router.message(CreatePollStates.waiting_options, Command("done"))
-async def finish_options(message: Message, state: FSMContext, bot: Bot, session_maker) -> None:
+async def finish_options(message: Message, state: FSMContext, bot: Bot, session_maker, scheduler=None) -> None:
     data = await state.get_data()
     options = data.get("options", [])
     if not options:
-        await cleanup_and_answer(message, state, "Нужно добавить хотя бы один вариант перед /done.")
+        await cleanup_and_answer(
+            message, state, "Нужно добавить хотя бы один вариант перед /done.", scheduler=scheduler
+        )
         return
 
     target_chat_id = data.get("target_chat_id")
     if target_chat_id is not None:
         await _create_and_publish_poll(
-            message, state, bot, session_maker, target_chat_id, data.get("target_message_thread_id")
+            message,
+            state,
+            bot,
+            session_maker,
+            target_chat_id,
+            data.get("target_message_thread_id"),
+            scheduler=scheduler,
         )
         return
 
     await state.set_state(CreatePollStates.waiting_chat)
     await cleanup_and_answer(
-        message, state, "Перешлите любое сообщение из целевого чата, либо пришлите его chat id."
+        message,
+        state,
+        "Перешлите любое сообщение из целевого чата, либо пришлите его chat id.",
+        scheduler=scheduler,
     )
 
 
 @router.message(CreatePollStates.waiting_options)
-async def receive_option(message: Message, state: FSMContext) -> None:
+async def receive_option(message: Message, state: FSMContext, scheduler=None) -> None:
     match = _OPTION_SEPARATOR_PATTERN.search(message.text) if message.text else None
     if not match:
         await cleanup_and_answer(
-            message, state, "Формат: Текст | ДД.ММ.ГГГГ (вместо | подойдёт и / или \\). Попробуйте снова."
+            message,
+            state,
+            "Формат: Текст | ДД.ММ.ГГГГ (вместо | подойдёт и / или \\). Попробуйте снова.",
+            scheduler=scheduler,
         )
         return
 
@@ -107,7 +126,7 @@ async def receive_option(message: Message, state: FSMContext) -> None:
     try:
         parsed_date = date_utils.parse_date_input(date_part.strip())
     except date_utils.DateParseError as exc:
-        await cleanup_and_answer(message, state, str(exc))
+        await cleanup_and_answer(message, state, str(exc), scheduler=scheduler)
         return
 
     data = await state.get_data()
@@ -118,11 +137,12 @@ async def receive_option(message: Message, state: FSMContext) -> None:
         message,
         state,
         f"Добавлено: {text_part} ({date_utils.format_date_ru(parsed_date)}). Ещё вариант или /done.",
+        scheduler=scheduler,
     )
 
 
 @router.message(CreatePollStates.waiting_chat)
-async def receive_target_chat(message: Message, state: FSMContext, bot: Bot, session_maker) -> None:
+async def receive_target_chat(message: Message, state: FSMContext, bot: Bot, session_maker, scheduler=None) -> None:
     chat_id = None
     forward_origin = getattr(message, "forward_origin", None)
     if forward_origin is not None and hasattr(forward_origin, "chat"):
@@ -137,11 +157,14 @@ async def receive_target_chat(message: Message, state: FSMContext, bot: Bot, ses
 
     if chat_id is None:
         await cleanup_and_answer(
-            message, state, "Не удалось определить чат. Перешлите сообщение из чата или пришлите его id."
+            message,
+            state,
+            "Не удалось определить чат. Перешлите сообщение из чата или пришлите его id.",
+            scheduler=scheduler,
         )
         return
 
-    await _create_and_publish_poll(message, state, bot, session_maker, chat_id)
+    await _create_and_publish_poll(message, state, bot, session_maker, chat_id, scheduler=scheduler)
 
 
 async def _create_and_publish_poll(
@@ -151,6 +174,7 @@ async def _create_and_publish_poll(
     session_maker,
     chat_id: int,
     message_thread_id: int | None = None,
+    scheduler=None,
 ) -> None:
     data = await state.get_data()
     title = data["title"]
@@ -185,6 +209,7 @@ async def _create_and_publish_poll(
                     state,
                     "Не удалось отправить опрос в этот чат. Проверьте, что бот добавлен в чат "
                     "и id указан верно, затем пришлите чат ещё раз.",
+                    scheduler=scheduler,
                 )
             else:
                 await cleanup_and_answer(
@@ -192,10 +217,11 @@ async def _create_and_publish_poll(
                     state,
                     "Не удалось опубликовать опрос в этом чате. Проверьте, что у бота есть права "
                     "отправлять сообщения, и повторите /done.",
+                    scheduler=scheduler,
                 )
             return
 
         await repo.set_poll_message(session, poll.id, sent.message_id)
 
     await state.clear()
-    await cleanup_and_answer(message, state, "Опрос создан и опубликован!")
+    await cleanup_and_answer(message, state, "Опрос создан и опубликован!", scheduler=scheduler)

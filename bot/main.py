@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from bot import jobs
 from bot.config import load_config
 from bot.db import create_engine_and_sessionmaker, init_db
-from bot.handlers import admin_create, admin_edit, voting
+from bot.handlers import admin_create, admin_edit, dialog_control, voting
 from bot.scheduler import create_scheduler, schedule_daily_reminder_job
 
 
@@ -33,6 +33,9 @@ async def main() -> None:
     # (e.g. a poll titled "Coffee & Games", or a voter whose display name has one).
     bot = Bot(token=config.bot_token)
     dp = Dispatcher(storage=MemoryStorage())  # in-process only; a restart mid-flow silently drops admin conversation state -- acceptable at this bot's scale
+    # dialog_control (/cancel) must be included before admin_create/admin_edit:
+    # see bot/handlers/dialog_control.py's module docstring for why the order matters.
+    dp.include_router(dialog_control.router)
     dp.include_router(admin_create.router)
     dp.include_router(admin_edit.router)
     dp.include_router(voting.router)
@@ -40,11 +43,13 @@ async def main() -> None:
     scheduler = create_scheduler(config.jobs_db_path, config.timezone)
     admin_mention = f"@{config.admin_username}"
 
-    # jobs.check_threshold/jobs.send_due_reminders are plain module-level functions
-    # (not closures) so APScheduler's SQLAlchemyJobStore can reference them by
-    # qualified name -- configure() sets the bot/session_maker/etc. they read from
-    # a shared module-level context instead of baking live resources into a closure.
-    jobs.configure(bot, session_maker, admin_mention, config.timezone)
+    # jobs.check_threshold/jobs.send_due_reminders/jobs.expire_dialog are plain
+    # module-level functions (not closures) so APScheduler's SQLAlchemyJobStore can
+    # reference them by qualified name -- configure() sets the bot/session_maker/etc.
+    # they read from a shared module-level context instead of baking live resources
+    # into a closure. expire_dialog also needs the dispatcher's FSM storage to look
+    # up/clear a stuck admin dialog by (chat_id, user_id).
+    jobs.configure(bot, session_maker, admin_mention, config.timezone, storage=dp.storage)
     schedule_daily_reminder_job(
         scheduler, jobs.send_due_reminders, config.reminder_hour, config.reminder_minute
     )
