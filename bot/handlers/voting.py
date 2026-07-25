@@ -97,7 +97,9 @@ async def handle_vote_toggle(
             await repo.set_announced(session, option_id, False)
         try:
             await bot.send_message(
-                chat_id=poll.chat_id, text=formatting.threshold_dropped_text(option_text, option_date)
+                chat_id=poll.chat_id,
+                text=formatting.threshold_dropped_text(option_text, option_date),
+                message_thread_id=poll.message_thread_id,
             )
         except Exception:
             logger.exception("Failed to send threshold-drop message for option %s", option_id)

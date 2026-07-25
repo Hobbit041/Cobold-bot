@@ -19,11 +19,21 @@ from bot.handlers.admin_edit import (
 from bot.scheduler import create_scheduler
 
 
+class FakeChat:
+    def __init__(self, id=1, type="private"):
+        self.id = id
+        self.type = type
+
+
 class FakeMessage:
-    def __init__(self, text, user_id=1):
+    def __init__(self, text, user_id=1, chat_type="private", chat_id=1, message_id=10):
         self.text = text
         self.from_user = type("U", (), {"id": user_id})()
+        self.chat = FakeChat(chat_id, chat_type)
+        self.message_id = message_id
         self.answer = AsyncMock()
+        self.delete = AsyncMock()
+        self.bot = AsyncMock()
 
 
 def _state():
@@ -55,6 +65,7 @@ async def test_edit_text_notifies_existing_voters(tmp_path, session_maker):
     fake_bot.send_message.assert_awaited_once_with(
         chat_id=100,
         text="@alice, вы проголосовали за вариант, но он изменился! В опрос внесены изменения: «24.07» → «24.07 (в 19:00)».",
+        message_thread_id=None,
     )
 
     async with session_maker() as session:
@@ -89,6 +100,7 @@ async def test_delete_option_notifies_and_removes_it(tmp_path, session_maker):
     fake_bot.send_message.assert_awaited_once_with(
         chat_id=100,
         text="@alice, вы проголосовали за вариант, но он изменился! В опрос внесены изменения: вариант «24.07» удалён.",
+        message_thread_id=None,
     )
 
     async with session_maker() as session:
@@ -120,6 +132,7 @@ async def test_edit_date_notifies_existing_voters(tmp_path, session_maker):
         chat_id=100,
         text="@alice, вы проголосовали за вариант, но он изменился! "
         "В опрос внесены изменения: «24.07» перенесён с 24 июля на 25 июля.",
+        message_thread_id=None,
     )
 
     async with session_maker() as session:
@@ -218,3 +231,53 @@ async def test_apply_new_text_shows_voter_names_for_all_options(tmp_path, sessio
     sent_text = fake_bot.edit_message_text.await_args.kwargs["text"]
     assert "1. 24.07 (в 19:00) (24 июля) — 1 🗳\n   @alice" in sent_text
     assert "2. 25.07 (25 июля) — 1 🗳\n   @bob" in sent_text
+
+
+async def test_editpoll_started_in_group_deletes_admin_messages_and_previous_prompts(
+    tmp_path, session_maker
+):
+    async with session_maker() as session:
+        poll = await repo.create_poll(session, chat_id=-500, title="Игра", options=[("24.07", dt.date(2026, 7, 24))])
+        await repo.set_poll_message(session, poll.id, message_id=42)
+
+    state = _state()
+    fake_bot = AsyncMock()
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
+
+    start_message = FakeMessage("/editpoll", chat_type="group", chat_id=-500, message_id=1)
+    await start_edit_poll(start_message, state, admin_id=1, session_maker=session_maker)
+    start_message.delete.assert_awaited_once()
+
+    poll_message = FakeMessage("1", chat_type="group", chat_id=-500, message_id=2)
+    await select_poll(poll_message, state, session_maker=session_maker)
+    poll_message.delete.assert_awaited_once()
+    # Deletes the bot's previous prompt ("Выберите опрос по номеру:") too.
+    poll_message.bot.delete_message.assert_awaited_once()
+
+
+async def test_apply_new_text_notification_uses_poll_message_thread_id(tmp_path, session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session,
+            chat_id=-500,
+            title="Игра",
+            options=[("24.07", dt.date(2026, 7, 24))],
+            message_thread_id=42,
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+        option = (await repo.get_poll_options(session, poll.id))[0]
+        await repo.toggle_vote(session, option.id, user_id=5, username="alice", first_name="Alice")
+
+    state = _state()
+    fake_bot = AsyncMock()
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
+
+    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await select_poll(FakeMessage("1"), state, session_maker=session_maker)
+    await select_option(FakeMessage("1"), state)
+    await select_action(
+        FakeMessage("text"), state, bot=fake_bot, session_maker=session_maker, scheduler=scheduler
+    )
+    await apply_new_text(FakeMessage("24.07 (в 19:00)"), state, bot=fake_bot, session_maker=session_maker)
+
+    assert fake_bot.send_message.await_args.kwargs["message_thread_id"] == 42

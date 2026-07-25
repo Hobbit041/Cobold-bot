@@ -120,6 +120,7 @@ async def test_handle_vote_toggle_dropping_below_threshold_sends_drop_message(tm
     fake_bot.send_message.assert_awaited_once_with(
         chat_id=100,
         text='За вариант "24.07 24 июля" снова меньше 4х человек. Проголосуйте, а то игра отменится!',
+        message_thread_id=None,
     )
     async with session_maker() as session:
         assert await repo.is_announced(session, option.id) is False
@@ -330,3 +331,37 @@ async def test_handle_vote_toggle_does_not_reschedule_timer_on_extra_votes_past_
     second_run_time = scheduler.get_job(threshold_job_id(option.id)).next_run_time
 
     assert second_run_time == first_run_time
+
+
+async def test_handle_vote_toggle_drop_message_uses_poll_message_thread_id(tmp_path, session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session,
+            chat_id=100,
+            title="Игра",
+            options=[("24.07", dt.date(2026, 7, 24))],
+            message_thread_id=42,
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+        option = (await repo.get_poll_options(session, poll.id))[0]
+        for user_id in range(4):
+            await repo.toggle_vote(
+                session, option.id, user_id=user_id, username=f"u{user_id}", first_name=f"U{user_id}"
+            )
+        await repo.set_announced(session, option.id, True)
+
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
+    fake_bot = AsyncMock()
+    callback = FakeCallback(data=f"vote:{option.id}", user=FakeUser(id=0, username="u0", first_name="U0"))
+
+    await handle_vote_toggle(
+        callback,
+        session_maker=session_maker,
+        scheduler=scheduler,
+        bot=fake_bot,
+        admin_mention="@admin",
+        threshold_check_callback=_noop_threshold_callback,
+        threshold_debounce_seconds=900,
+    )
+
+    assert fake_bot.send_message.await_args.kwargs["message_thread_id"] == 42

@@ -65,6 +65,7 @@ async def check_threshold(option_id: int) -> None:
 
             poll = await repo.get_poll(session, option.poll_id)
             chat_id = poll.chat_id
+            message_thread_id = poll.message_thread_id
             option_text = option.text
             option_date = option.date
 
@@ -74,6 +75,7 @@ async def check_threshold(option_id: int) -> None:
         await bot.send_message(
             chat_id=chat_id,
             text=formatting.threshold_reached_text(admin_mention, option_text, option_date),
+            message_thread_id=message_thread_id,
         )
 
         async with session_maker() as session:
@@ -100,11 +102,17 @@ async def send_due_reminders() -> None:
                 voters = await repo.get_voters(session, option.id)
                 mentions = [formatting.voter_mention(v.username, v.first_name) for v in voters]
                 poll = await repo.get_poll(session, option.poll_id)
-                to_send.append((poll.chat_id, option.id, option.date, mentions))
+                to_send.append(
+                    (poll.chat_id, poll.message_thread_id, option.id, option.date, mentions)
+                )
 
-        for chat_id, option_id, option_date, mentions in to_send:
+        for chat_id, message_thread_id, option_id, option_date, mentions in to_send:
             try:
-                await bot.send_message(chat_id=chat_id, text=formatting.reminder_text(option_date, mentions))
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=formatting.reminder_text(option_date, mentions),
+                    message_thread_id=message_thread_id,
+                )
             except Exception:
                 logger.exception("Failed to send reminder for option %s in chat %s", option_id, chat_id)
                 continue
