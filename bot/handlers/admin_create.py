@@ -8,7 +8,6 @@ bot.keyboards / bot.repo.
 from __future__ import annotations
 
 import datetime as dt
-import re
 
 from aiogram import Bot, Router
 from aiogram.filters import Command
@@ -20,9 +19,6 @@ from bot import date_utils, formatting, keyboards, repo
 from bot.handlers.dialog_cleanup import cleanup_and_answer
 
 router = Router(name="admin_create")
-
-# Splits "Текст | ДД.ММ.ГГГГ" (and the /, \ variants) at the first separator.
-_OPTION_SEPARATOR_PATTERN = re.compile(r"[|/\\]")
 
 
 class CreatePollStates(StatesGroup):
@@ -110,21 +106,8 @@ async def finish_options(message: Message, state: FSMContext, bot: Bot, session_
 
 @router.message(CreatePollStates.waiting_options)
 async def receive_option(message: Message, state: FSMContext, scheduler=None) -> None:
-    match = _OPTION_SEPARATOR_PATTERN.search(message.text) if message.text else None
-    if not match:
-        await cleanup_and_answer(
-            message,
-            state,
-            "Формат: Текст | ДД.ММ.ГГГГ (вместо | подойдёт и / или \\). Попробуйте снова.",
-            scheduler=scheduler,
-        )
-        return
-
-    text_part = message.text[: match.start()]
-    date_part = message.text[match.end():]
-    text_part = text_part.strip()
     try:
-        parsed_date = date_utils.parse_date_input(date_part.strip())
+        text_part, parsed_date = date_utils.parse_option_input(message.text or "")
     except date_utils.DateParseError as exc:
         await cleanup_and_answer(message, state, str(exc), scheduler=scheduler)
         return

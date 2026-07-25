@@ -2,7 +2,7 @@ import datetime as dt
 
 import pytest
 
-from bot.date_utils import DateParseError, format_date_ru, parse_date_input
+from bot.date_utils import DateParseError, format_date_ru, parse_date_input, parse_option_input
 
 
 def test_parse_full_date():
@@ -50,3 +50,31 @@ def test_parse_non_numeric_four_digit_year_raises():
 
 def test_format_date_ru():
     assert format_date_ru(dt.date(2026, 7, 24)) == "24 июля"
+
+
+def test_parse_option_input_pipe_separator():
+    text, date = parse_option_input("24.07 | 24.07.2026")
+    assert text == "24.07"
+    assert date == dt.date(2026, 7, 24)
+
+
+def test_parse_option_input_slash_separator():
+    text, date = parse_option_input("24.07 / 24.07.2026")
+    assert text == "24.07"
+    assert date == dt.date(2026, 7, 24)
+
+
+def test_parse_option_input_backslash_separator():
+    text, date = parse_option_input("24.07 \\ 24.07.2026")
+    assert text == "24.07"
+    assert date == dt.date(2026, 7, 24)
+
+
+def test_parse_option_input_no_separator_raises():
+    with pytest.raises(DateParseError):
+        parse_option_input("24.07 24.07.2026")
+
+
+def test_parse_option_input_invalid_date_raises():
+    with pytest.raises(DateParseError):
+        parse_option_input("24.07 | not-a-date")

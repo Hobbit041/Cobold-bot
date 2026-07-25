@@ -38,6 +38,7 @@ class EditPollStates(StatesGroup):
     waiting_action = State()
     waiting_new_text = State()
     waiting_new_date = State()
+    waiting_new_option = State()
 
 
 def _is_admin(message: Message, admin_id: int) -> bool:
@@ -90,7 +91,58 @@ async def select_poll(message: Message, state: FSMContext, session_maker, schedu
     await state.update_data(poll_id=poll_id, option_ids=[opt.id for opt in options])
     await state.set_state(EditPollStates.waiting_option_selection)
     await cleanup_and_answer(
-        message, state, "Выберите вариант по номеру:\n" + "\n".join(lines), scheduler=scheduler
+        message,
+        state,
+        "Выберите вариант по номеру, либо отправьте /addoption чтобы добавить новый:\n"
+        + "\n".join(lines),
+        scheduler=scheduler,
+    )
+
+
+@router.message(EditPollStates.waiting_option_selection, Command("addoption"))
+async def start_add_option(message: Message, state: FSMContext, scheduler=None) -> None:
+    await state.set_state(EditPollStates.waiting_new_option)
+    await cleanup_and_answer(
+        message,
+        state,
+        "Введите новый вариант в формате:\nТекст | ДД.ММ.ГГГГ (вместо | подойдёт и / или \\)",
+        scheduler=scheduler,
+    )
+
+
+@router.message(EditPollStates.waiting_new_option)
+async def receive_new_option(
+    message: Message, state: FSMContext, bot: Bot, session_maker, scheduler=None
+) -> None:
+    try:
+        option_text, option_date = date_utils.parse_option_input(message.text or "")
+    except date_utils.DateParseError as exc:
+        await cleanup_and_answer(message, state, str(exc), scheduler=scheduler)
+        return
+
+    data = await state.get_data()
+    poll_id = data["poll_id"]
+
+    async with session_maker() as session:
+        await repo.add_option(session, poll_id, option_text, option_date)
+        poll = await repo.get_poll(session, poll_id)
+        poll_options = await repo.get_poll_options(session, poll_id)
+        counts = {opt.id: await repo.get_vote_count(session, opt.id) for opt in poll_options}
+        voters_by_option = {
+            opt.id: [
+                formatting.voter_mention(v.username, v.first_name)
+                for v in await repo.get_voters(session, opt.id)
+            ]
+            for opt in poll_options
+        }
+
+    # A brand-new option has no prior voters, so there's nothing to notify --
+    # unlike edit/delete, only the poll message itself needs refreshing.
+    success = await _refresh_and_notify(bot, poll, poll_options, counts, voters_by_option, [], None)
+
+    await state.clear()
+    await cleanup_and_answer(
+        message, state, "Вариант добавлен." if success else _PARTIAL_FAILURE_MESSAGE, scheduler=scheduler
     )
 
 

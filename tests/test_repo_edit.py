@@ -29,3 +29,31 @@ async def test_delete_option_removes_votes_and_marks_deleted(session_maker, poll
         assert await repo.get_vote_count(session, option_id) == 0
         assert await session.get(ThresholdState, option_id) is None
         assert await session.get(Reminder, option_id) is None
+
+
+async def test_add_option_appends_after_existing_options(session_maker, poll_and_option):
+    poll_id, _ = poll_and_option
+    async with session_maker() as session:
+        new_option = await repo.add_option(session, poll_id, "25.07", dt.date(2026, 7, 25))
+
+        options = await repo.get_poll_options(session, poll_id)
+        assert [o.text for o in options] == ["24.07", "25.07"]
+        assert new_option.position > options[0].position
+
+
+async def test_add_option_creates_threshold_and_reminder_rows(session_maker, poll_and_option):
+    poll_id, _ = poll_and_option
+    async with session_maker() as session:
+        new_option = await repo.add_option(session, poll_id, "25.07", dt.date(2026, 7, 25))
+
+        assert await session.get(ThresholdState, new_option.id) is not None
+        assert await session.get(Reminder, new_option.id) is not None
+        assert await repo.get_vote_count(session, new_option.id) == 0
+
+
+async def test_add_option_to_poll_with_no_existing_options(session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(session, chat_id=1, title="Игра", options=[])
+        new_option = await repo.add_option(session, poll.id, "24.07", dt.date(2026, 7, 24))
+
+        assert new_option.position == 0

@@ -11,9 +11,11 @@ from bot.handlers.admin_edit import (
     EditPollStates,
     apply_new_date,
     apply_new_text,
+    receive_new_option,
     select_action,
     select_option,
     select_poll,
+    start_add_option,
     start_edit_poll,
 )
 from bot.scheduler import create_scheduler, dialog_timeout_job_id
@@ -311,3 +313,58 @@ async def test_editpoll_in_group_arms_idle_timeout_and_clears_it_on_finish(tmp_p
 
     assert await state.get_state() is None
     assert scheduler.get_job(dialog_timeout_job_id(-500, 3)) is None
+
+
+async def test_addoption_appends_new_option_and_refreshes_poll_message(tmp_path, session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(session, chat_id=100, title="Игра", options=[("24.07", dt.date(2026, 7, 24))])
+        await repo.set_poll_message(session, poll.id, message_id=42)
+        option = (await repo.get_poll_options(session, poll.id))[0]
+        await repo.toggle_vote(session, option.id, user_id=5, username="alice", first_name="Alice")
+
+    state = _state()
+    fake_bot = AsyncMock()
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
+
+    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await select_poll(FakeMessage("1"), state, session_maker=session_maker)
+    await start_add_option(FakeMessage("/addoption"), state, scheduler=scheduler)
+    assert await state.get_state() == EditPollStates.waiting_new_option.state
+
+    await receive_new_option(
+        FakeMessage("25.07 | 25.07.2026"), state, bot=fake_bot, session_maker=session_maker, scheduler=scheduler
+    )
+
+    fake_bot.edit_message_text.assert_awaited_once()
+    # Adding an option doesn't change anything existing voters voted for --
+    # they shouldn't get a "your vote changed" notification.
+    fake_bot.send_message.assert_not_awaited()
+    assert await state.get_state() is None
+
+    async with session_maker() as session:
+        options = await repo.get_poll_options(session, poll.id)
+        assert [o.text for o in options] == ["24.07", "25.07"]
+
+
+async def test_addoption_rejects_invalid_format_and_stays_in_state(tmp_path, session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(session, chat_id=100, title="Игра", options=[("24.07", dt.date(2026, 7, 24))])
+        await repo.set_poll_message(session, poll.id, message_id=42)
+
+    state = _state()
+    fake_bot = AsyncMock()
+
+    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await select_poll(FakeMessage("1"), state, session_maker=session_maker)
+    await start_add_option(FakeMessage("/addoption"), state)
+
+    bad_message = FakeMessage("no separator here")
+    await receive_new_option(bad_message, state, bot=fake_bot, session_maker=session_maker)
+
+    assert await state.get_state() == EditPollStates.waiting_new_option.state
+    fake_bot.edit_message_text.assert_not_awaited()
+    bad_message.answer.assert_awaited_once()
+
+    async with session_maker() as session:
+        options = await repo.get_poll_options(session, poll.id)
+        assert len(options) == 1

@@ -116,6 +116,20 @@ async def edit_option_date(session: AsyncSession, option_id: int, new_date: dt.d
     return option
 
 
+async def add_option(session: AsyncSession, poll_id: int, text: str, option_date: dt.date) -> Option:
+    existing = await get_poll_options(session, poll_id)
+    next_position = (max(o.position for o in existing) + 1) if existing else 0
+
+    option = Option(poll_id=poll_id, text=text, date=option_date, position=next_position)
+    session.add(option)
+    await session.flush()
+    session.add(ThresholdState(option_id=option.id, announced=False))
+    session.add(Reminder(option_id=option.id, sent=False))
+    await session.commit()
+    await session.refresh(option)
+    return option
+
+
 async def delete_option(session: AsyncSession, option_id: int) -> None:
     votes = await get_voters(session, option_id)
     for vote in votes:

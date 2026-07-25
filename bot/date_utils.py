@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
+
+# Splits "Текст | ДД.ММ.ГГГГ" (and the /, \ variants) at the first separator.
+_OPTION_SEPARATOR_PATTERN = re.compile(r"[|/\\]")
 
 MONTHS_RU = {
     1: "января", 2: "февраля", 3: "марта", 4: "апреля", 5: "мая", 6: "июня",
@@ -50,3 +54,20 @@ def parse_date_input(text: str, today: dt.date | None = None) -> dt.date:
 
 def format_date_ru(d: dt.date) -> str:
     return f"{d.day} {MONTHS_RU[d.month]}"
+
+
+def parse_option_input(text: str) -> tuple[str, dt.date]:
+    """Parse a "Текст | ДД.ММ.ГГГГ" line (| / \\ all accepted as separator).
+
+    Shared by /newpoll's option entry and /editpoll's "add option" flow so
+    both accept the exact same format and raise the exact same error.
+    """
+    match = _OPTION_SEPARATOR_PATTERN.search(text) if text else None
+    if not match:
+        raise DateParseError(
+            "Формат: Текст | ДД.ММ.ГГГГ (вместо | подойдёт и / или \\). Попробуйте снова."
+        )
+
+    option_text = text[: match.start()].strip()
+    date_part = text[match.end():].strip()
+    return option_text, parse_date_input(date_part)
