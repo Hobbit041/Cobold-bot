@@ -70,11 +70,22 @@ def test_parse_option_input_backslash_separator():
     assert date == dt.date(2026, 7, 24)
 
 
-def test_parse_option_input_no_separator_raises():
-    with pytest.raises(DateParseError):
-        parse_option_input("24.07 24.07.2026")
+def test_parse_option_input_without_separator_has_no_date():
+    text, date = parse_option_input("Играем во что-нибудь")
+    assert text == "Играем во что-нибудь"
+    assert date is None
 
 
 def test_parse_option_input_invalid_date_raises():
     with pytest.raises(DateParseError):
         parse_option_input("24.07 | not-a-date")
+
+
+def test_parse_option_input_blank_text_raises():
+    with pytest.raises(DateParseError):
+        parse_option_input("   ")
+
+
+def test_parse_option_input_blank_text_before_separator_raises():
+    with pytest.raises(DateParseError):
+        parse_option_input(" | 24.07.2026")

@@ -17,3 +17,9 @@ def test_build_poll_keyboard_creates_one_button_per_option():
     assert rows[0][0].callback_data == "vote:1"
     assert rows[1][0].text == "25.07 (25 июля) — 0"
     assert rows[1][0].callback_data == "vote:2"
+
+
+def test_build_poll_keyboard_option_without_date():
+    markup = build_poll_keyboard([(1, "Во что поиграть", None, 3)])
+
+    assert markup.inline_keyboard[0][0].text == "Во что поиграть — 3"

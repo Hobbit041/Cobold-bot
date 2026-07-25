@@ -19,6 +19,16 @@ async def test_create_poll_creates_options_with_state(session_maker):
         assert options[1].position == 1
 
 
+async def test_create_poll_accepts_option_with_no_date(session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=100, title="Игра", options=[("Во что поиграть", None)]
+        )
+
+        options = await repo.get_poll_options(session, poll.id)
+        assert options[0].date is None
+
+
 async def test_set_poll_message_stores_message_id(session_maker):
     async with session_maker() as session:
         poll = await repo.create_poll(

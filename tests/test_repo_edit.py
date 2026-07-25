@@ -57,3 +57,11 @@ async def test_add_option_to_poll_with_no_existing_options(session_maker):
         new_option = await repo.add_option(session, poll.id, "24.07", dt.date(2026, 7, 24))
 
         assert new_option.position == 0
+
+
+async def test_add_option_without_date(session_maker, poll_and_option):
+    poll_id, _ = poll_and_option
+    async with session_maker() as session:
+        new_option = await repo.add_option(session, poll_id, "Во что поиграть", None)
+
+        assert new_option.date is None

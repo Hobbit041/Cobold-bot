@@ -14,6 +14,7 @@ from bot.handlers.admin_create import (
     receive_title,
     start_create_poll,
 )
+from bot import repo
 from bot.models import Poll
 from bot.scheduler import create_scheduler, dialog_timeout_job_id
 
@@ -121,6 +122,40 @@ async def test_receive_option_accepts_backslash_separator():
     assert data["options"] == [{"text": "24.07", "date": "2026-07-24"}]
 
 
+async def test_receive_option_accepts_text_with_no_date():
+    state = _state()
+    await state.set_state(CreatePollStates.waiting_options)
+    await state.update_data(options=[])
+
+    message = FakeMessage("Во что поиграть")
+    await receive_option(message, state)
+
+    data = await state.get_data()
+    assert data["options"] == [{"text": "Во что поиграть", "date": None}]
+    assert "Добавлено: Во что поиграть." in message.answer.await_args.args[0]
+
+
+async def test_full_create_flow_persists_poll_with_dateless_option(session_maker):
+    state = _state()
+
+    await start_create_poll(FakeMessage("/newpoll", user_id=1), state, admin_id=1)
+    await receive_title(FakeMessage("Игра в апреле"), state)
+    await receive_option(FakeMessage("Во что поиграть"), state)
+
+    fake_bot = AsyncMock()
+    fake_bot.send_message.return_value = type("Sent", (), {"message_id": 999})()
+
+    await finish_options(FakeMessage("/done"), state, bot=fake_bot, session_maker=session_maker)
+    await receive_target_chat(FakeMessage("-100123"), state, bot=fake_bot, session_maker=session_maker)
+
+    async with session_maker() as session:
+        result = await session.execute(select(Poll))
+        poll = result.scalar_one()
+        options = await repo.get_poll_options(session, poll.id)
+        assert options[0].text == "Во что поиграть"
+        assert options[0].date is None
+
+
 async def test_receive_option_still_accepts_pipe_separator():
     state = _state()
     await state.set_state(CreatePollStates.waiting_options)
@@ -133,12 +168,12 @@ async def test_receive_option_still_accepts_pipe_separator():
     assert data["options"] == [{"text": "24.07", "date": "2026-07-24"}]
 
 
-async def test_receive_option_rejects_line_with_no_separator():
+async def test_receive_option_rejects_blank_text():
     state = _state()
     await state.set_state(CreatePollStates.waiting_options)
     await state.update_data(options=[])
 
-    message = FakeMessage("24.07 24.07.2026")
+    message = FakeMessage("   ")
     await receive_option(message, state)
 
     message.answer.assert_awaited_once()

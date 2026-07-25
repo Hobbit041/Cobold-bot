@@ -114,12 +114,13 @@ async def receive_option(message: Message, state: FSMContext, scheduler=None) ->
 
     data = await state.get_data()
     options = data.get("options", [])
-    options.append({"text": text_part, "date": parsed_date.isoformat()})
+    options.append({"text": text_part, "date": parsed_date.isoformat() if parsed_date else None})
     await state.update_data(options=options)
+    date_part = f" ({date_utils.format_date_ru(parsed_date)})" if parsed_date else ""
     await cleanup_and_answer(
         message,
         state,
-        f"Добавлено: {text_part} ({date_utils.format_date_ru(parsed_date)}). Ещё вариант или /done.",
+        f"Добавлено: {text_part}{date_part}. Ещё вариант или /done.",
         scheduler=scheduler,
     )
 
@@ -161,7 +162,10 @@ async def _create_and_publish_poll(
 ) -> None:
     data = await state.get_data()
     title = data["title"]
-    options = [(opt["text"], dt.date.fromisoformat(opt["date"])) for opt in data["options"]]
+    options = [
+        (opt["text"], dt.date.fromisoformat(opt["date"]) if opt["date"] else None)
+        for opt in data["options"]
+    ]
 
     async with session_maker() as session:
         poll = await repo.create_poll(

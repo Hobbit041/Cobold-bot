@@ -36,6 +36,11 @@ def test_format_option_line_with_empty_voter_list():
     assert line == "1. 24.07 (24 июля) — 0 🗳"
 
 
+def test_format_option_line_without_date():
+    line = format_option_line(1, "Во что поиграть", None, 2)
+    assert line == "1. Во что поиграть — 2 🗳"
+
+
 def test_poll_message_text_joins_lines():
     text = poll_message_text("Игра в апреле", ["1. 24.07 — 2 🗳", "2. 25.07 — 0 🗳"])
     assert text == "📅 Игра в апреле\n\n1. 24.07 — 2 🗳\n2. 25.07 — 0 🗳"
@@ -50,6 +55,18 @@ def test_threshold_dropped_text():
     text = threshold_dropped_text("24.07", dt.date(2026, 7, 24))
     assert text == (
         'За вариант "24.07 24 июля" снова меньше 4х человек. Проголосуйте, а то игра отменится!'
+    )
+
+
+def test_threshold_reached_text_without_date():
+    text = threshold_reached_text("@admin", "Во что поиграть", None)
+    assert text == '@admin, за вариант "Во что поиграть" достаточно голосов для брони!'
+
+
+def test_threshold_dropped_text_without_date():
+    text = threshold_dropped_text("Во что поиграть", None)
+    assert text == (
+        'За вариант "Во что поиграть" снова меньше 4х человек. Проголосуйте, а то игра отменится!'
     )
 
 
@@ -79,6 +96,14 @@ def test_option_date_changed_notification():
     assert text == (
         "@alice, вы проголосовали за вариант, но он изменился! "
         "В опрос внесены изменения: «Игра» перенесён с 24 июля на 26 июля."
+    )
+
+
+def test_option_date_changed_notification_from_no_date():
+    text = option_date_changed_notification("Игра", None, dt.date(2026, 7, 26), ["@alice"])
+    assert text == (
+        "@alice, вы проголосовали за вариант, но он изменился! "
+        "В опрос внесены изменения: у «Игра» появилась дата: 26 июля."
     )
 
 

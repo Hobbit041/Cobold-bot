@@ -20,7 +20,7 @@ async def create_poll(
     session: AsyncSession,
     chat_id: int,
     title: str,
-    options: list[tuple[str, dt.date]],
+    options: list[tuple[str, dt.date | None]],
     message_thread_id: int | None = None,
 ) -> Poll:
     poll = Poll(chat_id=chat_id, title=title, status="active", message_thread_id=message_thread_id)
@@ -116,7 +116,7 @@ async def edit_option_date(session: AsyncSession, option_id: int, new_date: dt.d
     return option
 
 
-async def add_option(session: AsyncSession, poll_id: int, text: str, option_date: dt.date) -> Option:
+async def add_option(session: AsyncSession, poll_id: int, text: str, option_date: dt.date | None) -> Option:
     existing = await get_poll_options(session, poll_id)
     next_position = (max(o.position for o in existing) + 1) if existing else 0
 

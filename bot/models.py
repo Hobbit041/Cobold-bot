@@ -32,7 +32,7 @@ class Option(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     poll_id: Mapped[int] = mapped_column(ForeignKey("polls.id"))
     text: Mapped[str]
-    date: Mapped[dt.date]
+    date: Mapped[dt.date | None] = mapped_column(default=None)
     position: Mapped[int]
     is_deleted: Mapped[bool] = mapped_column(default=False)
 

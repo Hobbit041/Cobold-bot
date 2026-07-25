@@ -87,7 +87,10 @@ async def select_poll(message: Message, state: FSMContext, session_maker, schedu
     async with session_maker() as session:
         options = await repo.get_poll_options(session, poll_id)
 
-    lines = [f"{i + 1}. {opt.text} ({date_utils.format_date_ru(opt.date)})" for i, opt in enumerate(options)]
+    lines = [
+        f"{i + 1}. {opt.text}" + (f" ({date_utils.format_date_ru(opt.date)})" if opt.date else "")
+        for i, opt in enumerate(options)
+    ]
     await state.update_data(poll_id=poll_id, option_ids=[opt.id for opt in options])
     await state.set_state(EditPollStates.waiting_option_selection)
     await cleanup_and_answer(

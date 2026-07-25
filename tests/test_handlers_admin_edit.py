@@ -358,7 +358,7 @@ async def test_addoption_rejects_invalid_format_and_stays_in_state(tmp_path, ses
     await select_poll(FakeMessage("1"), state, session_maker=session_maker)
     await start_add_option(FakeMessage("/addoption"), state)
 
-    bad_message = FakeMessage("no separator here")
+    bad_message = FakeMessage("текст | not-a-date")
     await receive_new_option(bad_message, state, bot=fake_bot, session_maker=session_maker)
 
     assert await state.get_state() == EditPollStates.waiting_new_option.state
@@ -368,3 +368,51 @@ async def test_addoption_rejects_invalid_format_and_stays_in_state(tmp_path, ses
     async with session_maker() as session:
         options = await repo.get_poll_options(session, poll.id)
         assert len(options) == 1
+
+
+async def test_addoption_accepts_text_with_no_date(tmp_path, session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(session, chat_id=100, title="Игра", options=[("24.07", dt.date(2026, 7, 24))])
+        await repo.set_poll_message(session, poll.id, message_id=42)
+
+    state = _state()
+    fake_bot = AsyncMock()
+
+    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await select_poll(FakeMessage("1"), state, session_maker=session_maker)
+    await start_add_option(FakeMessage("/addoption"), state)
+    await receive_new_option(FakeMessage("Во что поиграть"), state, bot=fake_bot, session_maker=session_maker)
+
+    fake_bot.edit_message_text.assert_awaited_once()
+
+    async with session_maker() as session:
+        options = await repo.get_poll_options(session, poll.id)
+        assert options[1].text == "Во что поиграть"
+        assert options[1].date is None
+
+
+async def test_apply_new_date_on_option_with_no_prior_date(tmp_path, session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(session, chat_id=100, title="Игра", options=[])
+        await repo.set_poll_message(session, poll.id, message_id=42)
+        option = await repo.add_option(session, poll.id, "Во что поиграть", None)
+        await repo.toggle_vote(session, option.id, user_id=5, username="alice", first_name="Alice")
+
+    state = _state()
+    fake_bot = AsyncMock()
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
+
+    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await select_poll(FakeMessage("1"), state, session_maker=session_maker)
+    await select_option(FakeMessage("1"), state)
+    await select_action(
+        FakeMessage("date"), state, bot=fake_bot, session_maker=session_maker, scheduler=scheduler
+    )
+    await apply_new_date(FakeMessage("25.07.2026"), state, bot=fake_bot, session_maker=session_maker)
+
+    fake_bot.send_message.assert_awaited_once_with(
+        chat_id=100,
+        text="@alice, вы проголосовали за вариант, но он изменился! "
+        "В опрос внесены изменения: у «Во что поиграть» появилась дата: 25 июля.",
+        message_thread_id=None,
+    )
