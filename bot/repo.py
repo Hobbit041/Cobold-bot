@@ -58,6 +58,37 @@ async def get_poll(session: AsyncSession, poll_id: int) -> Poll | None:
     return await session.get(Poll, poll_id)
 
 
+async def mark_poll_orphaned(session: AsyncSession, poll_id: int) -> None:
+    poll = await session.get(Poll, poll_id)
+    if poll is not None:
+        poll.status = "orphaned"
+        await session.commit()
+
+
+async def delete_poll(session: AsyncSession, poll_id: int) -> None:
+    result = await session.execute(select(Option).where(Option.poll_id == poll_id))
+    options = list(result.scalars().all())
+
+    for option in options:
+        votes = await get_voters(session, option.id)
+        for vote in votes:
+            await session.delete(vote)
+
+        threshold_state = await session.get(ThresholdState, option.id)
+        if threshold_state:
+            await session.delete(threshold_state)
+
+        reminder = await session.get(Reminder, option.id)
+        if reminder:
+            await session.delete(reminder)
+
+        await session.delete(option)
+
+    poll = await session.get(Poll, poll_id)
+    await session.delete(poll)
+    await session.commit()
+
+
 # --- Voting ----------------------------------------------------------------
 
 

@@ -60,3 +60,41 @@ async def test_create_poll_stores_message_thread_id(session_maker):
         )
 
         assert poll.message_thread_id == 42
+
+
+async def test_mark_poll_orphaned_sets_status(session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=100, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+        await repo.mark_poll_orphaned(session, poll.id)
+
+        refreshed = await repo.get_poll(session, poll.id)
+        assert refreshed.status == "orphaned"
+
+
+async def test_delete_poll_removes_poll_and_all_related_data(session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session,
+            chat_id=100,
+            title="Игра",
+            options=[("24.07", dt.date(2026, 7, 24)), ("25.07", dt.date(2026, 7, 25))],
+        )
+        options = await repo.get_poll_options(session, poll.id)
+        kept_option, deleted_option = options
+        await repo.toggle_vote(session, kept_option.id, user_id=5, username="alice", first_name="Alice")
+        await repo.delete_option(session, deleted_option.id)
+
+        poll_id = poll.id
+        kept_option_id = kept_option.id
+        deleted_option_id = deleted_option.id
+
+        await repo.delete_poll(session, poll_id)
+
+        assert await repo.get_poll(session, poll_id) is None
+        assert await session.get(repo.Option, kept_option_id) is None
+        assert await session.get(repo.Option, deleted_option_id) is None
+        assert await session.get(repo.ThresholdState, kept_option_id) is None
+        assert await session.get(repo.Reminder, kept_option_id) is None
+        assert await repo.get_voters(session, kept_option_id) == []
