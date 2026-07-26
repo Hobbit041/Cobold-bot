@@ -66,6 +66,8 @@ async def mark_poll_orphaned(session: AsyncSession, poll_id: int) -> None:
 
 
 async def delete_poll(session: AsyncSession, poll_id: int) -> None:
+    # Direct query, not get_poll_options: that filters is_deleted, but a full
+    # poll delete must purge every option row, including already-soft-deleted ones.
     result = await session.execute(select(Option).where(Option.poll_id == poll_id))
     options = list(result.scalars().all())
 
@@ -85,8 +87,9 @@ async def delete_poll(session: AsyncSession, poll_id: int) -> None:
         await session.delete(option)
 
     poll = await session.get(Poll, poll_id)
-    await session.delete(poll)
-    await session.commit()
+    if poll is not None:
+        await session.delete(poll)
+        await session.commit()
 
 
 # --- Voting ----------------------------------------------------------------

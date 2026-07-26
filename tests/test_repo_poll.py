@@ -98,3 +98,8 @@ async def test_delete_poll_removes_poll_and_all_related_data(session_maker):
         assert await session.get(repo.ThresholdState, kept_option_id) is None
         assert await session.get(repo.Reminder, kept_option_id) is None
         assert await repo.get_voters(session, kept_option_id) == []
+
+
+async def test_delete_poll_on_nonexistent_poll_id_is_a_noop(session_maker):
+    async with session_maker() as session:
+        await repo.delete_poll(session, 999999)
