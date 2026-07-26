@@ -44,6 +44,9 @@ async def start_delete_poll(
         return
 
     async with session_maker() as session:
+        # Unlike /editpoll and /copypoll, deliberately not filtered to status
+        # == "active" -- an already-"orphaned" poll must stay reachable here,
+        # or it would be permanently unreachable/undeletable from any command.
         result = await session.execute(select(Poll))
         polls = list(result.scalars().all())
 

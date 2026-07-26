@@ -78,6 +78,21 @@ async def test_start_delete_poll_lists_active_and_orphaned_polls(session_maker):
     assert len(data["poll_ids"]) == 2
 
 
+async def test_start_delete_poll_works_in_group_chat(session_maker):
+    async with session_maker() as session:
+        await repo.create_poll(
+            session, chat_id=100, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+
+    message = FakeMessage("/deletepoll", user_id=1, chat_type="supergroup", chat_id=-500)
+    state = _state()
+
+    await start_delete_poll(message, state, admin_id=1, session_maker=session_maker)
+
+    assert await state.get_state() == DeletePollStates.waiting_poll_selection.state
+    message.delete.assert_awaited_once()
+
+
 async def test_select_poll_to_delete_rejects_invalid_number(session_maker):
     state = _state()
     await state.set_state(DeletePollStates.waiting_poll_selection)
