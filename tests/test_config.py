@@ -31,7 +31,7 @@ def test_load_config_missing_token_raises(monkeypatch):
     monkeypatch.setenv("ADMIN_ID", "42")
     monkeypatch.setenv("ADMIN_USERNAME", "admin_user")
 
-    with pytest.raises(KeyError):
+    with pytest.raises(RuntimeError, match="BOT_TOKEN"):
         load_config()
 
 

@@ -54,6 +54,14 @@ async def main() -> None:
         scheduler, jobs.send_due_reminders, config.reminder_hour, config.reminder_minute
     )
 
+    # A webhook left over from a previous deployment/test would silently swallow all
+    # updates (Telegram won't deliver to getUpdates while a webhook is set), so drop
+    # it unconditionally before polling. This also gives an unambiguous log line to
+    # confirm the bot actually authorized with Telegram, not just that the process is up.
+    await bot.delete_webhook(drop_pending_updates=True)
+    me = await bot.get_me()
+    logging.info("Authorized as @%s (id=%s); starting polling", me.username, me.id)
+
     try:
         await dp.start_polling(
             bot,
