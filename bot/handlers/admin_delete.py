@@ -88,6 +88,10 @@ async def select_poll_to_delete(
 
     async with session_maker() as session:
         poll = await repo.get_poll(session, poll_id)
+        if poll is None:
+            await state.clear()
+            await cleanup_and_answer(message, state, "Опрос уже удалён.", scheduler=scheduler)
+            return
         chat_id = poll.chat_id
         message_id = poll.message_id
 

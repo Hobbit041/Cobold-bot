@@ -153,3 +153,18 @@ async def test_select_poll_to_delete_still_cleans_db_when_message_already_gone(s
     message.answer.assert_awaited_once_with("Опрос удалён.")
     async with session_maker() as session:
         assert await repo.get_poll(session, poll_id) is None
+
+
+async def test_select_poll_to_delete_when_poll_already_gone(session_maker):
+    state = _state()
+    await state.set_state(DeletePollStates.waiting_poll_selection)
+    await state.update_data(poll_ids=[999999])
+
+    fake_bot = AsyncMock()
+    message = FakeMessage("1")
+
+    await select_poll_to_delete(message, state, bot=fake_bot, session_maker=session_maker)
+
+    message.answer.assert_awaited_once_with("Опрос уже удалён.")
+    fake_bot.delete_message.assert_not_awaited()
+    assert await state.get_state() is None
