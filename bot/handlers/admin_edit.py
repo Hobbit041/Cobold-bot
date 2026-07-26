@@ -359,6 +359,9 @@ async def _refresh_and_notify(
     doesn't strand the FSM in a state where the *next* unrelated admin
     message gets silently reinterpreted as new option text/date. Returns
     True only if both steps succeeded.
+
+    If the message refresh fails due to a TelegramBadRequest with "not found"
+    in its message, the poll is marked as orphaned in the database.
     """
     ok = True
     try:
