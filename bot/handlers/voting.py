@@ -80,8 +80,11 @@ async def handle_vote_toggle(
         )
     except Exception as exc:
         if isinstance(exc, TelegramBadRequest) and "not found" in exc.message.lower():
-            async with session_maker() as session:
-                await repo.mark_poll_orphaned(session, poll.id)
+            try:
+                async with session_maker() as session:
+                    await repo.mark_poll_orphaned(session, poll.id)
+            except Exception:
+                logger.exception("Failed to mark poll %s orphaned", poll.id)
         # The vote is already committed; a stale/undeletable poll message
         # shouldn't block threshold bookkeeping or leave the tapper without
         # a response below.

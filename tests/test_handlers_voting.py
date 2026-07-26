@@ -207,6 +207,7 @@ async def test_handle_vote_toggle_survives_message_refresh_failure(tmp_path, ses
 
     async with session_maker() as session:
         assert await repo.get_vote_count(session, option.id) == 4
+        assert (await repo.get_poll(session, option.poll_id)).status == "active"
 
     assert scheduler.get_job(threshold_job_id(option.id)) is not None
     callback.answer.assert_awaited_once_with("Голос учтён!")
