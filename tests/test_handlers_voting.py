@@ -5,6 +5,9 @@ from zoneinfo import ZoneInfo
 import pytest
 from sqlalchemy.exc import IntegrityError
 
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.methods import EditMessageText
+
 from bot import repo
 from bot.handlers.voting import handle_vote_toggle
 from bot.scheduler import create_scheduler, threshold_job_id
@@ -207,6 +210,38 @@ async def test_handle_vote_toggle_survives_message_refresh_failure(tmp_path, ses
 
     assert scheduler.get_job(threshold_job_id(option.id)) is not None
     callback.answer.assert_awaited_once_with("Голос учтён!")
+
+
+async def test_handle_vote_toggle_marks_poll_orphaned_when_message_not_found(tmp_path, session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=100, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+        option = (await repo.get_poll_options(session, poll.id))[0]
+        poll_id = poll.id
+
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
+    fake_bot = AsyncMock()
+    fake_bot.edit_message_text.side_effect = TelegramBadRequest(
+        method=EditMessageText(chat_id=100, message_id=42, text="x"),
+        message="Bad Request: message to edit not found",
+    )
+    callback = FakeCallback(data=f"vote:{option.id}", user=FakeUser(id=10, username="alice", first_name="Alice"))
+
+    await handle_vote_toggle(
+        callback,
+        session_maker=session_maker,
+        scheduler=scheduler,
+        bot=fake_bot,
+        admin_mention="@admin",
+        threshold_check_callback=_noop_threshold_callback,
+        threshold_debounce_seconds=900,
+    )
+
+    async with session_maker() as session:
+        refreshed = await repo.get_poll(session, poll_id)
+        assert refreshed.status == "orphaned"
 
 
 async def test_handle_vote_toggle_message_shows_voter_names(tmp_path, session_maker):

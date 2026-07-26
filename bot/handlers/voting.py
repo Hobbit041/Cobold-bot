@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
 from sqlalchemy.exc import IntegrityError
 
@@ -77,7 +78,10 @@ async def handle_vote_toggle(
         await bot.edit_message_text(
             chat_id=poll.chat_id, message_id=poll.message_id, text=text, reply_markup=keyboard
         )
-    except Exception:
+    except Exception as exc:
+        if isinstance(exc, TelegramBadRequest) and "not found" in exc.message.lower():
+            async with session_maker() as session:
+                await repo.mark_poll_orphaned(session, poll.id)
         # The vote is already committed; a stale/undeletable poll message
         # shouldn't block threshold bookkeeping or leave the tapper without
         # a response below.
