@@ -84,12 +84,14 @@ async def finish_options(message: Message, state: FSMContext, bot: Bot, session_
 
     target_chat_id = data.get("target_chat_id")
     if target_chat_id is not None:
-        await _create_and_publish_poll(
+        await create_and_publish_poll(
             message,
             state,
             bot,
             session_maker,
             target_chat_id,
+            data["title"],
+            _parse_stored_options(options),
             data.get("target_message_thread_id"),
             scheduler=scheduler,
         )
@@ -148,25 +150,37 @@ async def receive_target_chat(message: Message, state: FSMContext, bot: Bot, ses
         )
         return
 
-    await _create_and_publish_poll(message, state, bot, session_maker, chat_id, scheduler=scheduler)
+    data = await state.get_data()
+    await create_and_publish_poll(
+        message,
+        state,
+        bot,
+        session_maker,
+        chat_id,
+        data["title"],
+        _parse_stored_options(data.get("options", [])),
+        scheduler=scheduler,
+    )
 
 
-async def _create_and_publish_poll(
+def _parse_stored_options(raw_options: list[dict]) -> list[tuple[str, dt.date | None]]:
+    return [
+        (opt["text"], dt.date.fromisoformat(opt["date"]) if opt["date"] else None)
+        for opt in raw_options
+    ]
+
+
+async def create_and_publish_poll(
     message: Message,
     state: FSMContext,
     bot: Bot,
     session_maker,
     chat_id: int,
+    title: str,
+    options: list[tuple[str, dt.date | None]],
     message_thread_id: int | None = None,
     scheduler=None,
 ) -> None:
-    data = await state.get_data()
-    title = data["title"]
-    options = [
-        (opt["text"], dt.date.fromisoformat(opt["date"]) if opt["date"] else None)
-        for opt in data["options"]
-    ]
-
     async with session_maker() as session:
         poll = await repo.create_poll(
             session,
@@ -203,7 +217,7 @@ async def _create_and_publish_poll(
                     message,
                     state,
                     "Не удалось опубликовать опрос в этом чате. Проверьте, что у бота есть права "
-                    "отправлять сообщения, и повторите /done.",
+                    "отправлять сообщения, и повторите попытку.",
                     scheduler=scheduler,
                 )
             return
