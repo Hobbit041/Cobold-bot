@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import glob
 import logging
 import os
 import sys
@@ -16,9 +17,30 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
+# bothost.ru's build installs dependencies into a `uv`-managed .venv (via `uv sync`)
+# that's separate from whatever "python" ends up running this file -- observed in
+# production: python-dotenv was confirmed installed during the build, then missing
+# at container runtime. Add the venv's site-packages directly so packages that only
+# live there (sqlalchemy, aiosqlite, apscheduler, ...) are importable regardless of
+# what the host's runtime PATH/interpreter turns out to be.
+for _site_packages in glob.glob(os.path.join(_REPO_ROOT, ".venv", "lib", "python*", "site-packages")):
+    if _site_packages not in sys.path:
+        sys.path.append(_site_packages)
+
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
-from dotenv import load_dotenv
+
+try:
+    # Only used to read a local .env file for convenience during development;
+    # every real deployment (systemd, bothost.ru) injects env vars directly, so
+    # a missing python-dotenv package -- which bothost.ru's builder has proven
+    # unreliable about installing -- shouldn't be able to crash the bot.
+    from dotenv import load_dotenv
+except ImportError:
+
+    def load_dotenv() -> None:
+        return None
+
 
 from bot import jobs
 from bot.config import load_config
