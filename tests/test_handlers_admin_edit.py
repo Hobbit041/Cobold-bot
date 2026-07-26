@@ -416,3 +416,38 @@ async def test_apply_new_date_on_option_with_no_prior_date(tmp_path, session_mak
         "В опрос внесены изменения: у «Во что поиграть» появилась дата: 25 июля.",
         message_thread_id=None,
     )
+
+
+async def test_select_poll_rejects_zero_instead_of_wrapping_to_last_poll(session_maker):
+    async with session_maker() as session:
+        await repo.create_poll(session, chat_id=100, title="Игра 1", options=[("24.07", dt.date(2026, 7, 24))])
+        await repo.create_poll(session, chat_id=100, title="Игра 2", options=[("25.07", dt.date(2026, 7, 25))])
+
+    state = _state()
+    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+
+    message = FakeMessage("0")
+    await select_poll(message, state, session_maker=session_maker)
+
+    message.answer.assert_awaited_once_with("Некорректный номер. Попробуйте снова.")
+    assert await state.get_state() == EditPollStates.waiting_poll_selection.state
+
+
+async def test_select_option_rejects_zero_instead_of_wrapping_to_last_option(session_maker):
+    async with session_maker() as session:
+        await repo.create_poll(
+            session,
+            chat_id=100,
+            title="Игра",
+            options=[("24.07", dt.date(2026, 7, 24)), ("25.07", dt.date(2026, 7, 25))],
+        )
+
+    state = _state()
+    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await select_poll(FakeMessage("1"), state, session_maker=session_maker)
+
+    message = FakeMessage("0")
+    await select_option(message, state)
+
+    message.answer.assert_awaited_once_with("Некорректный номер. Попробуйте снова.")
+    assert await state.get_state() == EditPollStates.waiting_option_selection.state

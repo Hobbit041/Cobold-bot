@@ -77,6 +77,8 @@ async def select_poll(message: Message, state: FSMContext, session_maker, schedu
     poll_ids = data["poll_ids"]
     try:
         index = int(message.text.strip()) - 1
+        if index < 0:
+            raise IndexError
         poll_id = poll_ids[index]
     except (ValueError, IndexError, AttributeError):
         await cleanup_and_answer(
@@ -155,6 +157,8 @@ async def select_option(message: Message, state: FSMContext, scheduler=None) -> 
     option_ids = data["option_ids"]
     try:
         index = int(message.text.strip()) - 1
+        if index < 0:
+            raise IndexError
         option_id = option_ids[index]
     except (ValueError, IndexError, AttributeError):
         await cleanup_and_answer(
