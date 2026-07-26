@@ -45,7 +45,7 @@ except ImportError:
 from bot import jobs
 from bot.config import load_config
 from bot.db import create_engine_and_sessionmaker, init_db
-from bot.handlers import admin_create, admin_edit, dialog_control, voting
+from bot.handlers import admin_copy, admin_create, admin_edit, dialog_control, voting
 from bot.scheduler import create_scheduler, schedule_daily_reminder_job
 
 
@@ -67,11 +67,12 @@ async def main() -> None:
     # (e.g. a poll titled "Coffee & Games", or a voter whose display name has one).
     bot = Bot(token=config.bot_token)
     dp = Dispatcher(storage=MemoryStorage())  # in-process only; a restart mid-flow silently drops admin conversation state -- acceptable at this bot's scale
-    # dialog_control (/cancel) must be included before admin_create/admin_edit:
+    # dialog_control (/cancel) must be included before admin_create/admin_edit/admin_copy:
     # see bot/handlers/dialog_control.py's module docstring for why the order matters.
     dp.include_router(dialog_control.router)
     dp.include_router(admin_create.router)
     dp.include_router(admin_edit.router)
+    dp.include_router(admin_copy.router)
     dp.include_router(voting.router)
 
     scheduler = create_scheduler(config.jobs_db_path, config.timezone)
