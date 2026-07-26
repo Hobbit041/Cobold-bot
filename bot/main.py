@@ -1,20 +1,30 @@
 # bot/main.py
-# Must be run as `python -m bot.main` from the repo root -- the relative imports
-# below only resolve when this file is loaded as part of the `bot` package.
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import sys
+
+# The host runs this file directly (`python bot/main.py`), not as a module
+# (`python -m bot.main`) -- confirmed in production: relative imports here
+# failed with "attempted relative import with no known parent package", which
+# only happens under direct script execution. Running a script by path puts
+# its own directory, not the repo root, at the front of sys.path, so the
+# `from bot import ...` imports below need the repo root added explicitly.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
 
-from . import jobs
-from .config import load_config
-from .db import create_engine_and_sessionmaker, init_db
-from .handlers import admin_create, admin_edit, dialog_control, voting
-from .scheduler import create_scheduler, schedule_daily_reminder_job
+from bot import jobs
+from bot.config import load_config
+from bot.db import create_engine_and_sessionmaker, init_db
+from bot.handlers import admin_create, admin_edit, dialog_control, voting
+from bot.scheduler import create_scheduler, schedule_daily_reminder_job
 
 
 async def main() -> None:
