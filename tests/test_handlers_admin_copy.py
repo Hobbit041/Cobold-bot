@@ -104,6 +104,20 @@ async def test_select_poll_to_copy_rejects_invalid_number(session_maker):
     assert await state.get_state() == CopyPollStates.waiting_poll_selection.state
 
 
+async def test_select_poll_to_copy_rejects_zero(session_maker):
+    state = _state()
+    await state.set_state(CopyPollStates.waiting_poll_selection)
+    await state.update_data(poll_ids=[1, 2, 3], target_chat_id=-500, target_message_thread_id=None)
+
+    message = FakeMessage("0", chat_type="supergroup", chat_id=-500)
+    fake_bot = AsyncMock()
+
+    await select_poll_to_copy(message, state, bot=fake_bot, session_maker=session_maker)
+
+    message.answer.assert_awaited_once_with("Некорректный номер. Попробуйте снова.")
+    assert await state.get_state() == CopyPollStates.waiting_poll_selection.state
+
+
 async def test_select_poll_to_copy_creates_new_poll_without_votes_or_deleted_options(session_maker):
     async with session_maker() as session:
         source = await repo.create_poll(

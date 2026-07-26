@@ -81,6 +81,8 @@ async def select_poll_to_copy(
     poll_ids = data["poll_ids"]
     try:
         index = int(message.text.strip()) - 1
+        if index < 0:
+            raise IndexError
         poll_id = poll_ids[index]
     except (ValueError, IndexError, AttributeError):
         await cleanup_and_answer(
