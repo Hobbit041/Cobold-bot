@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 
 from aiogram import Bot, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -143,7 +144,7 @@ async def receive_new_option(
 
     # A brand-new option has no prior voters, so there's nothing to notify --
     # unlike edit/delete, only the poll message itself needs refreshing.
-    success = await _refresh_and_notify(bot, poll, poll_options, counts, voters_by_option, [], None)
+    success = await _refresh_and_notify(bot, poll, poll_options, counts, voters_by_option, [], None, session_maker)
 
     await state.clear()
     await cleanup_and_answer(
@@ -237,7 +238,7 @@ async def apply_new_text(message: Message, state: FSMContext, bot: Bot, session_
         notification_text = formatting.option_text_changed_notification(old_text, new_text, mentions)
 
     success = await _refresh_and_notify(
-        bot, poll, poll_options, counts, voters_by_option, voters, notification_text
+        bot, poll, poll_options, counts, voters_by_option, voters, notification_text, session_maker
     )
 
     await state.clear()
@@ -288,7 +289,7 @@ async def apply_new_date(message: Message, state: FSMContext, bot: Bot, session_
         notification_text = formatting.option_date_changed_notification(updated.text, old_date, new_date, mentions)
 
     success = await _refresh_and_notify(
-        bot, poll, poll_options, counts, voters_by_option, voters, notification_text
+        bot, poll, poll_options, counts, voters_by_option, voters, notification_text, session_maker
     )
 
     await state.clear()
@@ -330,7 +331,7 @@ async def _apply_delete(message: Message, state: FSMContext, bot: Bot, session_m
         notification_text = formatting.option_deleted_notification(option_text, mentions)
 
     success = await _refresh_and_notify(
-        bot, poll, poll_options, counts, voters_by_option, voters, notification_text
+        bot, poll, poll_options, counts, voters_by_option, voters, notification_text, session_maker
     )
 
     await state.clear()
@@ -347,6 +348,7 @@ async def _refresh_and_notify(
     voters_by_option: dict[int, list[str]],
     voters,
     notification_text: str | None,
+    session_maker,
 ) -> bool:
     """Refresh the live poll message and notify voters (if any).
 
@@ -360,7 +362,7 @@ async def _refresh_and_notify(
     """
     ok = True
     try:
-        await _refresh_poll_message(bot, poll, poll_options, counts, voters_by_option)
+        await _refresh_poll_message(bot, poll, poll_options, counts, voters_by_option, session_maker)
     except Exception:
         logger.exception("Failed to refresh poll message for poll %s", poll.id)
         ok = False
@@ -383,6 +385,7 @@ async def _refresh_poll_message(
     poll_options,
     counts: dict[int, int],
     voters_by_option: dict[int, list[str]],
+    session_maker,
 ) -> None:
     lines = [
         formatting.format_option_line(
@@ -394,4 +397,10 @@ async def _refresh_poll_message(
     keyboard = keyboards.build_poll_keyboard(
         [(opt.id, opt.text, opt.date, counts[opt.id]) for opt in poll_options]
     )
-    await bot.edit_message_text(chat_id=poll.chat_id, message_id=poll.message_id, text=text, reply_markup=keyboard)
+    try:
+        await bot.edit_message_text(chat_id=poll.chat_id, message_id=poll.message_id, text=text, reply_markup=keyboard)
+    except TelegramBadRequest as exc:
+        if "not found" in exc.message.lower():
+            async with session_maker() as session:
+                await repo.mark_poll_orphaned(session, poll.id)
+        raise

@@ -2,9 +2,11 @@ import datetime as dt
 from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.methods import EditMessageText
 
 from bot import repo
 from bot.handlers.admin_edit import (
@@ -451,3 +453,27 @@ async def test_select_option_rejects_zero_instead_of_wrapping_to_last_option(ses
 
     message.answer.assert_awaited_once_with("Некорректный номер. Попробуйте снова.")
     assert await state.get_state() == EditPollStates.waiting_option_selection.state
+
+
+async def test_apply_new_text_marks_poll_orphaned_when_message_not_found(session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(session, chat_id=100, title="Игра", options=[("24.07", dt.date(2026, 7, 24))])
+        await repo.set_poll_message(session, poll.id, message_id=42)
+        poll_id = poll.id
+
+    state = _state()
+    fake_bot = AsyncMock()
+    fake_bot.edit_message_text.side_effect = TelegramBadRequest(
+        method=EditMessageText(chat_id=100, message_id=42, text="x"),
+        message="Bad Request: message to edit not found",
+    )
+
+    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await select_poll(FakeMessage("1"), state, session_maker=session_maker)
+    await select_option(FakeMessage("1"), state)
+    await select_action(FakeMessage("text"), state, bot=fake_bot, session_maker=session_maker)
+    await apply_new_text(FakeMessage("24.07 (в 19:00)"), state, bot=fake_bot, session_maker=session_maker)
+
+    async with session_maker() as session:
+        refreshed = await repo.get_poll(session, poll_id)
+        assert refreshed.status == "orphaned"
