@@ -197,6 +197,8 @@ async def test_edit_text_survives_refresh_failure_and_still_replies(tmp_path, se
     async with session_maker() as session:
         options = await repo.get_poll_options(session, poll.id)
         assert options[0].text == "24.07 (в 19:00)"
+        # Generic exceptions (not TelegramBadRequest) should not orphan the poll.
+        assert (await repo.get_poll(session, poll.id)).status == "active"
 
     # FSM state was cleared, so a stale waiting_new_text handler can't
     # silently reinterpret the admin's next unrelated message.
