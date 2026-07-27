@@ -71,20 +71,41 @@ def test_threshold_dropped_text_without_date():
 
 
 def test_option_deleted_notification_lists_voters():
-    text = option_deleted_notification("24.07", ["@alice", "Bob"])
+    text = option_deleted_notification("24.07", dt.date(2026, 7, 24), ["@alice", "Bob"])
     assert text == (
         "@alice, Bob, вы проголосовали за вариант, но он изменился! "
-        "В опрос внесены изменения: вариант «24.07» удалён."
+        "В опрос внесены изменения: вариант «24 июля (24.07)» удалён."
     )
 
 
 def test_option_deleted_notification_without_voters():
-    text = option_deleted_notification("24.07", [])
-    assert text == "вы проголосовали за вариант, но он изменился! В опрос внесены изменения: вариант «24.07» удалён."
+    text = option_deleted_notification("24.07", dt.date(2026, 7, 24), [])
+    assert text == (
+        "вы проголосовали за вариант, но он изменился! "
+        "В опрос внесены изменения: вариант «24 июля (24.07)» удалён."
+    )
+
+
+def test_option_deleted_notification_without_date():
+    text = option_deleted_notification("Во что поиграть", None, ["@alice"])
+    assert text == (
+        "@alice, вы проголосовали за вариант, но он изменился! "
+        "В опрос внесены изменения: вариант «Во что поиграть» удалён."
+    )
 
 
 def test_option_text_changed_notification():
-    text = option_text_changed_notification("24.07", "24.07 (уточнено время)", ["@alice"])
+    text = option_text_changed_notification(
+        "24.07", "24.07 (уточнено время)", dt.date(2026, 7, 24), ["@alice"]
+    )
+    assert text == (
+        "@alice, вы проголосовали за вариант, но он изменился! "
+        "В опрос внесены изменения: «24 июля (24.07)» → «24 июля (24.07 (уточнено время))»."
+    )
+
+
+def test_option_text_changed_notification_without_date():
+    text = option_text_changed_notification("24.07", "24.07 (уточнено время)", None, ["@alice"])
     assert text == (
         "@alice, вы проголосовали за вариант, но он изменился! "
         "В опрос внесены изменения: «24.07» → «24.07 (уточнено время)»."

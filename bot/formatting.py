@@ -43,19 +43,32 @@ def threshold_dropped_text(option_text: str, option_date: dt.date | None) -> str
     )
 
 
-def option_deleted_notification(option_text: str, voter_mentions: list[str]) -> str:
+def _dated_label(option_text: str, option_date: dt.date | None) -> str:
+    if option_date is None:
+        return option_text
+    return f"{format_date_ru(option_date)} ({option_text})"
+
+
+def option_deleted_notification(
+    option_text: str, option_date: dt.date | None, voter_mentions: list[str]
+) -> str:
     prefix = f"{', '.join(voter_mentions)}, " if voter_mentions else ""
+    label = _dated_label(option_text, option_date)
     return (
         f"{prefix}вы проголосовали за вариант, но он изменился! "
-        f"В опрос внесены изменения: вариант «{option_text}» удалён."
+        f"В опрос внесены изменения: вариант «{label}» удалён."
     )
 
 
-def option_text_changed_notification(old_text: str, new_text: str, voter_mentions: list[str]) -> str:
+def option_text_changed_notification(
+    old_text: str, new_text: str, option_date: dt.date | None, voter_mentions: list[str]
+) -> str:
     prefix = f"{', '.join(voter_mentions)}, " if voter_mentions else ""
+    old_label = _dated_label(old_text, option_date)
+    new_label = _dated_label(new_text, option_date)
     return (
         f"{prefix}вы проголосовали за вариант, но он изменился! "
-        f"В опрос внесены изменения: «{old_text}» → «{new_text}»."
+        f"В опрос внесены изменения: «{old_label}» → «{new_label}»."
     )
 
 
