@@ -65,3 +65,22 @@ async def test_add_option_without_date(session_maker, poll_and_option):
         new_option = await repo.add_option(session, poll_id, "Во что поиграть", None)
 
         assert new_option.date is None
+
+
+async def test_reorder_options_updates_position_order(session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session,
+            chat_id=1,
+            title="Игра",
+            options=[("A", None), ("B", None), ("C", None), ("D", None)],
+        )
+        options = await repo.get_poll_options(session, poll.id)
+        ids = [o.id for o in options]
+
+    async with session_maker() as session:
+        await repo.reorder_options(session, [ids[2], ids[0], ids[3], ids[1]])
+
+    async with session_maker() as session:
+        reordered = await repo.get_poll_options(session, poll.id)
+        assert [o.text for o in reordered] == ["C", "A", "D", "B"]

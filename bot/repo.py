@@ -150,6 +150,13 @@ async def edit_option_date(session: AsyncSession, option_id: int, new_date: dt.d
     return option
 
 
+async def reorder_options(session: AsyncSession, ordered_option_ids: list[int]) -> None:
+    for position, option_id in enumerate(ordered_option_ids):
+        option = await session.get(Option, option_id)
+        option.position = position
+    await session.commit()
+
+
 async def add_option(session: AsyncSession, poll_id: int, text: str, option_date: dt.date | None) -> Option:
     existing = await get_poll_options(session, poll_id)
     next_position = (max(o.position for o in existing) + 1) if existing else 0
