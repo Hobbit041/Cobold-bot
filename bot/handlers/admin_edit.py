@@ -40,6 +40,7 @@ class EditPollStates(StatesGroup):
     waiting_new_text = State()
     waiting_new_date = State()
     waiting_new_option = State()
+    waiting_new_order = State()
 
 
 def _is_admin(message: Message, admin_id: int) -> bool:
@@ -149,6 +150,81 @@ async def receive_new_option(
     await state.clear()
     await cleanup_and_answer(
         message, state, "Вариант добавлен." if success else _PARTIAL_FAILURE_MESSAGE, scheduler=scheduler
+    )
+
+
+@router.message(EditPollStates.waiting_option_selection, Command("revoll"))
+async def start_reorder(message: Message, state: FSMContext, session_maker, scheduler=None) -> None:
+    data = await state.get_data()
+    poll_id = data["poll_id"]
+
+    async with session_maker() as session:
+        options = await repo.get_poll_options(session, poll_id)
+
+    lines = [
+        f"{i + 1}. {opt.text}" + (f" ({date_utils.format_date_ru(opt.date)})" if opt.date else "")
+        for i, opt in enumerate(options)
+    ]
+    await state.update_data(option_ids=[opt.id for opt in options])
+    await state.set_state(EditPollStates.waiting_new_order)
+    await cleanup_and_answer(
+        message,
+        state,
+        "Текущий порядок:\n" + "\n".join(lines)
+        + "\n\nВведите новый порядок номеров через пробел, например: 1 3 4 2",
+        scheduler=scheduler,
+    )
+
+
+@router.message(EditPollStates.waiting_new_order)
+async def apply_new_order(message: Message, state: FSMContext, bot: Bot, session_maker, scheduler=None) -> None:
+    data = await state.get_data()
+    option_ids = data["option_ids"]
+    poll_id = data["poll_id"]
+    n = len(option_ids)
+
+    parts = (message.text or "").split()
+    valid = False
+    indices: list[int] = []
+    if len(parts) == n and all(p.isdigit() for p in parts):
+        indices = [int(p) - 1 for p in parts]
+        valid = sorted(indices) == list(range(n))
+
+    if not valid:
+        await cleanup_and_answer(
+            message,
+            state,
+            f"Некорректный порядок. Нужно указать все номера от 1 до {n} через пробел, "
+            "каждый ровно один раз. Например: 1 3 4 2",
+            scheduler=scheduler,
+        )
+        return
+
+    ordered_option_ids = [option_ids[i] for i in indices]
+
+    async with session_maker() as session:
+        await repo.reorder_options(session, ordered_option_ids)
+        poll = await repo.get_poll(session, poll_id)
+        poll_options = await repo.get_poll_options(session, poll_id)
+        counts = {opt.id: await repo.get_vote_count(session, opt.id) for opt in poll_options}
+        voters_by_option = {
+            opt.id: [
+                formatting.voter_mention(v.username, v.first_name)
+                for v in await repo.get_voters(session, opt.id)
+            ]
+            for opt in poll_options
+        }
+
+    success = await _refresh_and_notify(
+        bot, poll, poll_options, counts, voters_by_option, [], None, session_maker
+    )
+
+    await state.clear()
+    await cleanup_and_answer(
+        message,
+        state,
+        "Порядок вариантов обновлён." if success else _PARTIAL_FAILURE_MESSAGE,
+        scheduler=scheduler,
     )
 
 

@@ -12,6 +12,7 @@ from bot import repo
 from bot.handlers.admin_edit import (
     EditPollStates,
     apply_new_date,
+    apply_new_order,
     apply_new_text,
     receive_new_option,
     select_action,
@@ -19,6 +20,7 @@ from bot.handlers.admin_edit import (
     select_poll,
     start_add_option,
     start_edit_poll,
+    start_reorder,
 )
 from bot.scheduler import create_scheduler, dialog_timeout_job_id
 
@@ -534,3 +536,61 @@ async def test_apply_new_text_marks_poll_orphaned_when_message_not_found(session
     async with session_maker() as session:
         refreshed = await repo.get_poll(session, poll_id)
         assert refreshed.status == "orphaned"
+
+
+async def test_revoll_reorders_options_and_refreshes_message(tmp_path, session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session,
+            chat_id=100,
+            title="Игра",
+            options=[("A", None), ("B", None), ("C", None), ("D", None)],
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+
+    state = _state()
+    fake_bot = AsyncMock()
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
+
+    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await select_poll(FakeMessage("1"), state, session_maker=session_maker)
+    await start_reorder(FakeMessage("/revoll"), state, session_maker=session_maker, scheduler=scheduler)
+    assert await state.get_state() == EditPollStates.waiting_new_order.state
+
+    await apply_new_order(
+        FakeMessage("1 3 4 2"), state, bot=fake_bot, session_maker=session_maker, scheduler=scheduler
+    )
+
+    fake_bot.edit_message_text.assert_awaited_once()
+    fake_bot.send_message.assert_not_awaited()
+    assert await state.get_state() is None
+
+    async with session_maker() as session:
+        options = await repo.get_poll_options(session, poll.id)
+        assert [o.text for o in options] == ["A", "C", "D", "B"]
+
+
+async def test_revoll_rejects_invalid_order_and_stays_in_state(tmp_path, session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=100, title="Игра", options=[("A", None), ("B", None)]
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+
+    state = _state()
+    fake_bot = AsyncMock()
+
+    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await select_poll(FakeMessage("1"), state, session_maker=session_maker)
+    await start_reorder(FakeMessage("/revoll"), state, session_maker=session_maker)
+
+    bad_message = FakeMessage("1 1")
+    await apply_new_order(bad_message, state, bot=fake_bot, session_maker=session_maker)
+
+    assert await state.get_state() == EditPollStates.waiting_new_order.state
+    fake_bot.edit_message_text.assert_not_awaited()
+    bad_message.answer.assert_awaited_once()
+
+    async with session_maker() as session:
+        options = await repo.get_poll_options(session, poll.id)
+        assert [o.text for o in options] == ["A", "B"]

@@ -150,6 +150,9 @@ async def edit_option_date(session: AsyncSession, option_id: int, new_date: dt.d
     return option
 
 
+# Callers must pass the full set of a single poll's option IDs, in the desired
+# order -- omitting an id leaves it with a stale position, and unknown ids will
+# raise on the session.get() below.
 async def reorder_options(session: AsyncSession, ordered_option_ids: list[int]) -> None:
     for position, option_id in enumerate(ordered_option_ids):
         option = await session.get(Option, option_id)
