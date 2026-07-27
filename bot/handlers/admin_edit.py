@@ -219,6 +219,7 @@ async def apply_new_text(message: Message, state: FSMContext, bot: Bot, session_
             return
 
         old_text = option.text
+        option_date = option.date
         voters = await repo.get_voters(session, option_id)
         updated = await repo.edit_option_text(session, option_id, new_text)
         poll = await repo.get_poll(session, updated.poll_id)
@@ -233,9 +234,9 @@ async def apply_new_text(message: Message, state: FSMContext, bot: Bot, session_
         }
 
     notification_text = None
-    if voters:
+    if voters and option_date is not None:
         mentions = [formatting.voter_mention(v.username, v.first_name) for v in voters]
-        notification_text = formatting.option_text_changed_notification(old_text, new_text, mentions)
+        notification_text = formatting.option_text_changed_notification(old_text, new_text, option_date, mentions)
 
     success = await _refresh_and_notify(
         bot, poll, poll_options, counts, voters_by_option, voters, notification_text, session_maker
@@ -284,7 +285,7 @@ async def apply_new_date(message: Message, state: FSMContext, bot: Bot, session_
         }
 
     notification_text = None
-    if voters:
+    if voters and old_date is not None:
         mentions = [formatting.voter_mention(v.username, v.first_name) for v in voters]
         notification_text = formatting.option_date_changed_notification(updated.text, old_date, new_date, mentions)
 
@@ -310,6 +311,7 @@ async def _apply_delete(message: Message, state: FSMContext, bot: Bot, session_m
             return
 
         option_text = option.text
+        option_date = option.date
         voters = await repo.get_voters(session, option_id)
         poll = await repo.get_poll(session, option.poll_id)
         await repo.delete_option(session, option_id)
@@ -326,9 +328,9 @@ async def _apply_delete(message: Message, state: FSMContext, bot: Bot, session_m
     cancel_threshold_check(scheduler, option_id)
 
     notification_text = None
-    if voters:
+    if voters and option_date is not None:
         mentions = [formatting.voter_mention(v.username, v.first_name) for v in voters]
-        notification_text = formatting.option_deleted_notification(option_text, mentions)
+        notification_text = formatting.option_deleted_notification(option_text, option_date, mentions)
 
     success = await _refresh_and_notify(
         bot, poll, poll_options, counts, voters_by_option, voters, notification_text, session_maker

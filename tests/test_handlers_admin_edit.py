@@ -69,7 +69,8 @@ async def test_edit_text_notifies_existing_voters(tmp_path, session_maker):
     fake_bot.edit_message_text.assert_awaited_once()
     fake_bot.send_message.assert_awaited_once_with(
         chat_id=100,
-        text="@alice, вы проголосовали за вариант, но он изменился! В опрос внесены изменения: «24.07» → «24.07 (в 19:00)».",
+        text="@alice, вы проголосовали за вариант, но он изменился! "
+        "В опрос внесены изменения: «24 июля (24.07)» → «24 июля (24.07 (в 19:00))».",
         message_thread_id=None,
     )
 
@@ -104,7 +105,8 @@ async def test_delete_option_notifies_and_removes_it(tmp_path, session_maker):
 
     fake_bot.send_message.assert_awaited_once_with(
         chat_id=100,
-        text="@alice, вы проголосовали за вариант, но он изменился! В опрос внесены изменения: вариант «24.07» удалён.",
+        text="@alice, вы проголосовали за вариант, но он изменился! "
+        "В опрос внесены изменения: вариант «24 июля (24.07)» удалён.",
         message_thread_id=None,
     )
 
@@ -414,12 +416,65 @@ async def test_apply_new_date_on_option_with_no_prior_date(tmp_path, session_mak
     )
     await apply_new_date(FakeMessage("25.07.2026"), state, bot=fake_bot, session_maker=session_maker)
 
-    fake_bot.send_message.assert_awaited_once_with(
-        chat_id=100,
-        text="@alice, вы проголосовали за вариант, но он изменился! "
-        "В опрос внесены изменения: у «Во что поиграть» появилась дата: 25 июля.",
-        message_thread_id=None,
+    fake_bot.send_message.assert_not_awaited()
+
+    async with session_maker() as session:
+        options = await repo.get_poll_options(session, poll.id)
+        assert options[0].date == dt.date(2026, 7, 25)
+
+
+async def test_edit_text_on_option_without_date_sends_no_notification(tmp_path, session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(session, chat_id=100, title="Игра", options=[])
+        await repo.set_poll_message(session, poll.id, message_id=42)
+        option = await repo.add_option(session, poll.id, "Во что поиграть", None)
+        await repo.toggle_vote(session, option.id, user_id=5, username="alice", first_name="Alice")
+
+    state = _state()
+    fake_bot = AsyncMock()
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
+
+    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await select_poll(FakeMessage("1"), state, session_maker=session_maker)
+    await select_option(FakeMessage("1"), state)
+    await select_action(
+        FakeMessage("text"), state, bot=fake_bot, session_maker=session_maker, scheduler=scheduler
     )
+    await apply_new_text(
+        FakeMessage("Во что-нибудь поиграть"), state, bot=fake_bot, session_maker=session_maker
+    )
+
+    fake_bot.edit_message_text.assert_awaited_once()
+    fake_bot.send_message.assert_not_awaited()
+
+    async with session_maker() as session:
+        options = await repo.get_poll_options(session, poll.id)
+        assert options[0].text == "Во что-нибудь поиграть"
+
+
+async def test_delete_option_without_date_sends_no_notification(tmp_path, session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(session, chat_id=100, title="Игра", options=[])
+        await repo.set_poll_message(session, poll.id, message_id=42)
+        option = await repo.add_option(session, poll.id, "Во что поиграть", None)
+        await repo.toggle_vote(session, option.id, user_id=5, username="alice", first_name="Alice")
+
+    state = _state()
+    fake_bot = AsyncMock()
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
+
+    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await select_poll(FakeMessage("1"), state, session_maker=session_maker)
+    await select_option(FakeMessage("1"), state)
+    await select_action(
+        FakeMessage("delete"), state, bot=fake_bot, session_maker=session_maker, scheduler=scheduler
+    )
+
+    fake_bot.send_message.assert_not_awaited()
+
+    async with session_maker() as session:
+        remaining = await repo.get_poll_options(session, poll.id)
+        assert remaining == []
 
 
 async def test_select_poll_rejects_zero_instead_of_wrapping_to_last_poll(session_maker):
