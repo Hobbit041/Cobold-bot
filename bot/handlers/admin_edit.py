@@ -186,9 +186,13 @@ async def apply_new_order(message: Message, state: FSMContext, bot: Bot, session
     parts = (message.text or "").split()
     valid = False
     indices: list[int] = []
-    if len(parts) == n and all(p.isdigit() for p in parts):
-        indices = [int(p) - 1 for p in parts]
-        valid = sorted(indices) == list(range(n))
+    if len(parts) == n:
+        try:
+            indices = [int(p) - 1 for p in parts]
+        except ValueError:
+            indices = []
+        else:
+            valid = sorted(indices) == list(range(n))
 
     if not valid:
         await cleanup_and_answer(
@@ -203,6 +207,12 @@ async def apply_new_order(message: Message, state: FSMContext, bot: Bot, session
     ordered_option_ids = [option_ids[i] for i in indices]
 
     async with session_maker() as session:
+        current_options = await repo.get_poll_options(session, poll_id)
+        if {opt.id for opt in current_options} != set(ordered_option_ids):
+            await state.clear()
+            await cleanup_and_answer(message, state, _OPTION_GONE_MESSAGE, scheduler=scheduler)
+            return
+
         await repo.reorder_options(session, ordered_option_ids)
         poll = await repo.get_poll(session, poll_id)
         poll_options = await repo.get_poll_options(session, poll_id)

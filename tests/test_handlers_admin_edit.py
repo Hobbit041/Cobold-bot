@@ -594,3 +594,29 @@ async def test_revoll_rejects_invalid_order_and_stays_in_state(tmp_path, session
     async with session_maker() as session:
         options = await repo.get_poll_options(session, poll.id)
         assert [o.text for o in options] == ["A", "B"]
+
+
+async def test_revoll_rejects_non_numeric_order_and_stays_in_state(tmp_path, session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=100, title="Игра", options=[("A", None), ("B", None)]
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+
+    state = _state()
+    fake_bot = AsyncMock()
+
+    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await select_poll(FakeMessage("1"), state, session_maker=session_maker)
+    await start_reorder(FakeMessage("/revoll"), state, session_maker=session_maker)
+
+    bad_message = FakeMessage("a b")
+    await apply_new_order(bad_message, state, bot=fake_bot, session_maker=session_maker)
+
+    assert await state.get_state() == EditPollStates.waiting_new_order.state
+    fake_bot.edit_message_text.assert_not_awaited()
+    bad_message.answer.assert_awaited_once()
+
+    async with session_maker() as session:
+        options = await repo.get_poll_options(session, poll.id)
+        assert [o.text for o in options] == ["A", "B"]
