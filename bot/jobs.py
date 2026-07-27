@@ -70,6 +70,8 @@ async def check_threshold(option_id: int) -> None:
             option = await session.get(repo.Option, option_id)
             if option is None or option.is_deleted:
                 return
+            if option.date is None:
+                return
 
             count = await repo.get_vote_count(session, option_id)
             if not threshold_logic.should_announce_on_timer_fire(count):

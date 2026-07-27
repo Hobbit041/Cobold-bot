@@ -177,6 +177,26 @@ async def test_threshold_check_callback_skips_deleted_option(session_maker):
     assert fake_bot.sent_messages == []
 
 
+async def test_threshold_check_callback_skips_option_without_date(session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=555, title="Игра", options=[("Во что поиграть", None)]
+        )
+        option = (await repo.get_poll_options(session, poll.id))[0]
+        for user_id in range(4):
+            await repo.toggle_vote(
+                session, option.id, user_id=user_id, username=f"user{user_id}", first_name=f"User{user_id}"
+            )
+
+    fake_bot = FakeBot()
+    jobs.configure(fake_bot, session_maker, admin_mention="@admin", timezone=ZoneInfo("Europe/Moscow"))
+    await jobs.check_threshold(option.id)
+
+    assert fake_bot.sent_messages == []
+    async with session_maker() as session:
+        assert await repo.is_announced(session, option.id) is False
+
+
 async def test_daily_reminder_callback_one_failed_send_does_not_block_others(session_maker):
     tz = ZoneInfo("Europe/Moscow")
     tomorrow = dt.datetime.now(tz).date() + dt.timedelta(days=1)
