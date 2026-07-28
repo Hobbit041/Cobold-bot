@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from bot.config import load_config
@@ -57,7 +59,6 @@ def test_relative_db_paths_resolve_under_data_dir(monkeypatch):
 
     config = load_config()
 
-    import os
     assert config.db_path == os.path.join("/app/data", "poll_bot.sqlite3")
     assert config.jobs_db_path == os.path.join("/app/data", "jobs.sqlite3")
 
