@@ -8,11 +8,11 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 COPY . .
 
-# bothost.ru persists /app/data across redeploys; keep the sqlite databases there
-# so poll history and scheduled reminders survive a rebuild.
+# bothost.ru persists /app/data across redeploys. The app resolves relative
+# DB_PATH/JOBS_DB_PATH inside DATA_DIR, so setting DATA_DIR is enough to keep
+# poll history and scheduled reminders in the persistent volume. (Absolute
+# ENV DB_PATH here would be overridden by the panel's env vars anyway.)
 ENV DATA_DIR=/app/data
-ENV DB_PATH=/app/data/poll_bot.sqlite3
-ENV JOBS_DB_PATH=/app/data/jobs.sqlite3
 RUN mkdir -p /app/data
 
 CMD ["python", "-m", "bot.main"]
