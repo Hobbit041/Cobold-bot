@@ -22,7 +22,7 @@ from bot.handlers.admin_edit import (
     start_edit_poll,
     start_reorder,
 )
-from bot.scheduler import create_scheduler, dialog_timeout_job_id
+from bot.scheduler import create_scheduler, dialog_timeout_job_id, message_deletion_job_id
 
 
 class FakeChat:
@@ -294,6 +294,38 @@ async def test_apply_new_text_notification_uses_poll_message_thread_id(tmp_path,
     assert fake_bot.send_message.await_args.kwargs["message_thread_id"] == 42
 
 
+async def test_reorder_in_group_cleans_prompt_and_schedules_confirmation(tmp_path, session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session,
+            chat_id=-500,
+            title="Игра",
+            options=[("A", dt.date(2026, 7, 24)), ("B", dt.date(2026, 7, 25))],
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+        options = await repo.get_poll_options(session, poll.id)
+        poll_id = poll.id
+        option_ids = [opt.id for opt in options]
+
+    state = _state()
+    await state.set_state(EditPollStates.waiting_new_order)
+    # last_bot_message_id is the "Введите новый порядок" prompt that used to
+    # be left hanging after the order was applied.
+    await state.update_data(poll_id=poll_id, option_ids=option_ids, last_bot_message_id=777)
+
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
+    fake_bot = AsyncMock()
+    message = FakeMessage("2 1", chat_type="supergroup", chat_id=-500, message_id=88)
+    message.answer.return_value = type("Sent", (), {"message_id": 900})()
+
+    await apply_new_order(message, state, bot=fake_bot, session_maker=session_maker, scheduler=scheduler)
+
+    message.bot.delete_message.assert_awaited_once_with(chat_id=-500, message_id=777)
+    message.answer.assert_awaited_once_with("Порядок вариантов обновлён.")
+    assert await state.get_state() is None
+    assert scheduler.get_job(message_deletion_job_id(-500, 900)) is not None
+
+
 async def test_editpoll_in_group_arms_idle_timeout_and_clears_it_on_finish(tmp_path, session_maker):
     async with session_maker() as session:
         poll = await repo.create_poll(session, chat_id=-500, title="Игра", options=[("24.07", dt.date(2026, 7, 24))])
@@ -315,6 +347,7 @@ async def test_editpoll_in_group_arms_idle_timeout_and_clears_it_on_finish(tmp_p
     await select_option(option_message, state, scheduler=scheduler)
 
     action_message = FakeMessage("delete", user_id=3, chat_type="group", chat_id=-500, message_id=4)
+    action_message.answer.return_value = type("Sent", (), {"message_id": 952})()
     await select_action(
         action_message, state, bot=fake_bot, session_maker=session_maker, scheduler=scheduler
     )

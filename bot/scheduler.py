@@ -83,6 +83,30 @@ def schedule_daily_reminder_job(scheduler: AsyncIOScheduler, callback, hour: int
     )
 
 
+def message_deletion_job_id(chat_id: int, message_id: int) -> str:
+    return f"delete_message:{chat_id}:{message_id}"
+
+
+def schedule_message_deletion(
+    scheduler: AsyncIOScheduler, chat_id: int, message_id: int, callback, delay_seconds: int = 15
+) -> None:
+    """Schedule a one-shot job to delete a bot message after `delay_seconds`.
+
+    Used to make transient confirmations ("Опрос удалён.", "Вариант обновлён.",
+    ...) auto-expire so they don't linger in group chats. The job id is unique
+    per (chat_id, message_id), so scheduling deletion of one confirmation never
+    clobbers another still pending.
+    """
+    run_date = dt.datetime.now(scheduler.timezone) + dt.timedelta(seconds=delay_seconds)
+    scheduler.add_job(
+        callback,
+        trigger=DateTrigger(run_date=run_date),
+        args=[chat_id, message_id],
+        id=message_deletion_job_id(chat_id, message_id),
+        replace_existing=True,
+    )
+
+
 def dialog_timeout_job_id(chat_id: int, user_id: int) -> str:
     return f"dialog_timeout:{chat_id}:{user_id}"
 

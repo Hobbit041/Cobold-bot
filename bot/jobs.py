@@ -137,6 +137,29 @@ async def send_due_reminders() -> None:
         in_flight_jobs.discard(task)
 
 
+async def delete_message(chat_id: int, message_id: int) -> None:
+    """Delete a bot message, scheduled to run some delay after it was sent.
+
+    Backs bot.scheduler.schedule_message_deletion so transient confirmations
+    auto-expire instead of lingering in group chats. A plain module-level
+    function (reading the bot from the shared context) so APScheduler's
+    SQLAlchemyJobStore can pickle it by qualified name, like the other jobs
+    here. Failures are swallowed: the message may already be gone (admin
+    deleted it by hand) or the API call may transiently fail, and neither
+    should crash the executor.
+    """
+    task = asyncio.current_task()
+    in_flight_jobs.add(task)
+    try:
+        bot = _context.bot
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=message_id)
+        except Exception:
+            logger.exception("Failed to auto-delete message %s in chat %s", message_id, chat_id)
+    finally:
+        in_flight_jobs.discard(task)
+
+
 async def expire_dialog(chat_id: int, user_id: int, message_thread_id: int | None) -> None:
     """Force-exit a stuck /newpoll or /editpoll dialog after 5 minutes of silence.
 

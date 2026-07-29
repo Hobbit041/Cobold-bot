@@ -70,6 +70,7 @@ async def test_cancel_clears_active_create_poll_dialog():
 
 async def test_cancel_in_group_deletes_messages_and_cancels_pending_timeout(tmp_path):
     message = FakeMessage(user_id=1, chat_type="group", chat_id=-500, message_id=7)
+    message.answer.return_value = type("Sent", (), {"message_id": 950})()
     state = _state()
     await state.set_state(CreatePollStates.waiting_options)
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))

@@ -14,7 +14,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from bot.handlers.dialog_cleanup import cleanup_and_answer
+from bot.handlers.dialog_cleanup import cleanup_and_finish
 
 router = Router(name="dialog_control")
 
@@ -26,14 +26,13 @@ def _is_admin(message: Message, admin_id: int) -> bool:
 @router.message(Command("cancel"))
 async def cancel_dialog(message: Message, state: FSMContext, admin_id: int, scheduler=None) -> None:
     if not _is_admin(message, admin_id):
-        await cleanup_and_answer(
+        await cleanup_and_finish(
             message, state, "Эта команда доступна только администратору.", scheduler=scheduler
         )
         return
 
     if await state.get_state() is None:
-        await cleanup_and_answer(message, state, "Нечего отменять.", scheduler=scheduler)
+        await cleanup_and_finish(message, state, "Нечего отменять.", scheduler=scheduler)
         return
 
-    await state.clear()
-    await cleanup_and_answer(message, state, "Действие отменено.", scheduler=scheduler)
+    await cleanup_and_finish(message, state, "Действие отменено.", scheduler=scheduler)

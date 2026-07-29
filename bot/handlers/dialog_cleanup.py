@@ -9,10 +9,19 @@ import logging
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from bot.jobs import expire_dialog
-from bot.scheduler import cancel_dialog_timeout, schedule_dialog_timeout
+from bot.jobs import delete_message, expire_dialog
+from bot.scheduler import (
+    cancel_dialog_timeout,
+    schedule_dialog_timeout,
+    schedule_message_deletion,
+)
 
 logger = logging.getLogger(__name__)
+
+# How long a terminal confirmation ("Опрос удалён.", "Вариант обновлён.", ...)
+# stays visible in a group chat before it's auto-deleted, so a finished dialog
+# leaves no trailing clutter behind.
+CONFIRMATION_TTL_SECONDS = 15
 
 
 async def cleanup_and_answer(
@@ -68,5 +77,65 @@ async def cleanup_and_answer(
             schedule_dialog_timeout(
                 scheduler, chat_id, user_id, message.message_thread_id, callback=expire_dialog
             )
+
+    return sent
+
+
+async def cleanup_and_finish(
+    message: Message, state: FSMContext, text: str, scheduler=None, **kwargs
+) -> Message:
+    """Send the terminal message of an admin dialog (or a dead-end reply).
+
+    This is the end-of-dialog counterpart to cleanup_and_answer, and exists
+    because ending a dialog needs a different order of operations than
+    continuing one: the trailing prompt id lives in FSM data, so the state
+    must be read *before* it's cleared. (Handlers that cleared state first and
+    then called cleanup_and_answer lost last_bot_message_id and left their last
+    prompt hanging -- the bug this fixes.)
+
+    In any non-private chat it: reads the previous prompt id, clears the FSM
+    state, cancels the idle timeout, deletes the admin's triggering message and
+    the previous prompt, sends `text`, and schedules that confirmation to be
+    auto-deleted after CONFIRMATION_TTL_SECONDS so it doesn't linger. In
+    private chats it only clears state and answers -- a 1:1 history with the
+    bot isn't clutter, matching cleanup_and_answer's philosophy.
+    """
+    data = await state.get_data()
+    last_bot_message_id = data.get("last_bot_message_id")
+    chat_id = message.chat.id
+    user_id = message.from_user.id if message.from_user is not None else None
+
+    await state.clear()
+    if scheduler is not None and user_id is not None:
+        cancel_dialog_timeout(scheduler, chat_id, user_id)
+
+    if message.chat.type == "private":
+        return await message.answer(text, **kwargs)
+
+    try:
+        await message.delete()
+    except Exception:
+        logger.exception(
+            "Failed to delete admin message %s in chat %s", message.message_id, chat_id
+        )
+
+    if last_bot_message_id is not None:
+        try:
+            await message.bot.delete_message(chat_id=chat_id, message_id=last_bot_message_id)
+        except Exception:
+            logger.exception(
+                "Failed to delete previous bot prompt %s in chat %s", last_bot_message_id, chat_id
+            )
+
+    sent = await message.answer(text, **kwargs)
+
+    if scheduler is not None:
+        schedule_message_deletion(
+            scheduler,
+            chat_id,
+            sent.message_id,
+            callback=delete_message,
+            delay_seconds=CONFIRMATION_TTL_SECONDS,
+        )
 
     return sent

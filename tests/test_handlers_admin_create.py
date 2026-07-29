@@ -316,6 +316,7 @@ async def test_newpoll_in_group_arms_idle_timeout_and_clears_it_on_finish(sessio
         FakeMessage("24.07 | 24.07.2026", user_id=9, chat_type="supergroup", chat_id=-600), state, scheduler=scheduler
     )
     done_message = FakeMessage("/done", user_id=9, chat_type="supergroup", chat_id=-600)
+    done_message.answer.return_value = type("Sent", (), {"message_id": 951})()
     await finish_options(done_message, state, bot=fake_bot, session_maker=session_maker, scheduler=scheduler)
 
     assert await state.get_state() is None

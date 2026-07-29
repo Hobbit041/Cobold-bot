@@ -5,14 +5,20 @@ from bot.scheduler import (
     cancel_threshold_check,
     create_scheduler,
     dialog_timeout_job_id,
+    message_deletion_job_id,
     schedule_daily_reminder_job,
     schedule_dialog_timeout,
+    schedule_message_deletion,
     schedule_threshold_check,
     threshold_job_id,
 )
 
 
 def _noop(option_id):
+    pass
+
+
+def _noop_delete(chat_id, message_id):
     pass
 
 
@@ -114,3 +120,26 @@ def test_cancel_dialog_timeout_noop_when_no_job(tmp_path):
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
 
     cancel_dialog_timeout(scheduler, chat_id=-100, user_id=999)
+
+
+def test_schedule_message_deletion_creates_job(tmp_path):
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
+
+    schedule_message_deletion(
+        scheduler, chat_id=-100, message_id=555, callback=_noop_delete, delay_seconds=15
+    )
+
+    job = scheduler.get_job(message_deletion_job_id(-100, 555))
+    assert job is not None
+    assert job.args == (-100, 555)
+
+
+def test_schedule_message_deletion_distinct_jobs_per_message(tmp_path):
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
+
+    schedule_message_deletion(scheduler, chat_id=-100, message_id=1, callback=_noop_delete)
+    schedule_message_deletion(scheduler, chat_id=-100, message_id=2, callback=_noop_delete)
+
+    assert scheduler.get_job(message_deletion_job_id(-100, 1)) is not None
+    assert scheduler.get_job(message_deletion_job_id(-100, 2)) is not None
+    assert len(scheduler.get_jobs()) == 2

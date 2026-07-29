@@ -18,7 +18,7 @@ from aiogram.types import Message
 from sqlalchemy import select
 
 from bot import repo
-from bot.handlers.dialog_cleanup import cleanup_and_answer
+from bot.handlers.dialog_cleanup import cleanup_and_answer, cleanup_and_finish
 from bot.models import Poll
 
 router = Router(name="admin_delete")
@@ -38,7 +38,7 @@ async def start_delete_poll(
     message: Message, state: FSMContext, admin_id: int, session_maker, scheduler=None
 ) -> None:
     if not _is_admin(message, admin_id):
-        await cleanup_and_answer(
+        await cleanup_and_finish(
             message, state, "Эта команда доступна только администратору.", scheduler=scheduler
         )
         return
@@ -51,7 +51,7 @@ async def start_delete_poll(
         polls = list(result.scalars().all())
 
     if not polls:
-        await cleanup_and_answer(message, state, "Опросов нет.", scheduler=scheduler)
+        await cleanup_and_finish(message, state, "Опросов нет.", scheduler=scheduler)
         return
 
     lines = [
@@ -89,8 +89,7 @@ async def select_poll_to_delete(
     async with session_maker() as session:
         poll = await repo.get_poll(session, poll_id)
         if poll is None:
-            await state.clear()
-            await cleanup_and_answer(message, state, "Опрос уже удалён.", scheduler=scheduler)
+            await cleanup_and_finish(message, state, "Опрос уже удалён.", scheduler=scheduler)
             return
         chat_id = poll.chat_id
         message_id = poll.message_id
@@ -106,5 +105,4 @@ async def select_poll_to_delete(
     async with session_maker() as session:
         await repo.delete_poll(session, poll_id)
 
-    await state.clear()
-    await cleanup_and_answer(message, state, "Опрос удалён.", scheduler=scheduler)
+    await cleanup_and_finish(message, state, "Опрос удалён.", scheduler=scheduler)
