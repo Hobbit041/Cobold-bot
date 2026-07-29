@@ -18,6 +18,16 @@ async def test_edit_option_date(session_maker, poll_and_option):
         assert updated.date == dt.date(2026, 8, 1)
 
 
+async def test_edit_poll_title(session_maker, poll_and_option):
+    poll_id, _ = poll_and_option
+    async with session_maker() as session:
+        updated = await repo.edit_poll_title(session, poll_id, "Новая игра")
+        assert updated.title == "Новая игра"
+
+    async with session_maker() as session:
+        assert (await repo.get_poll(session, poll_id)).title == "Новая игра"
+
+
 async def test_delete_option_removes_votes_and_marks_deleted(session_maker, poll_and_option):
     poll_id, option_id = poll_and_option
     async with session_maker() as session:

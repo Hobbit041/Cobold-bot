@@ -27,6 +27,7 @@ router = Router(name="admin_edit")
 logger = logging.getLogger(__name__)
 
 _OPTION_GONE_MESSAGE = "Этот вариант больше недоступен (возможно, уже удалён)."
+_POLL_GONE_MESSAGE = "Этот опрос больше недоступен (возможно, уже удалён)."
 _PARTIAL_FAILURE_MESSAGE = (
     "Изменения сохранены в базе, но не удалось обновить сообщение в чате и/или "
     "уведомить проголосовавших. Проверьте опрос вручную."
@@ -100,7 +101,8 @@ async def select_poll(message: Message, state: FSMContext, session_maker, schedu
     await cleanup_and_answer(
         message,
         state,
-        "Выберите вариант по номеру, либо отправьте /addoption чтобы добавить новый:\n"
+        "Выберите вариант по номеру, отправьте /addoption чтобы добавить новый, "
+        "либо пришлите любой другой текст, чтобы изменить название опроса:\n"
         + "\n".join(lines),
         scheduler=scheduler,
     )
@@ -236,21 +238,33 @@ async def apply_new_order(message: Message, state: FSMContext, bot: Bot, session
 
 
 @router.message(EditPollStates.waiting_option_selection)
-async def select_option(message: Message, state: FSMContext, scheduler=None) -> None:
+async def select_option(message: Message, state: FSMContext, bot=None, session_maker=None, scheduler=None) -> None:
     data = await state.get_data()
     option_ids = data["option_ids"]
+    poll_id = data["poll_id"]
+    text = (message.text or "").strip()
+
     try:
-        index = int(message.text.strip()) - 1
-        if index < 0:
-            raise IndexError
-        option_id = option_ids[index]
-    except (ValueError, IndexError, AttributeError):
+        index = int(text) - 1
+    except ValueError:
+        # Not a number, and /addoption + /revoll are caught by their own
+        # handlers before this one -- so any other non-empty text is taken as
+        # a new poll title.
+        if not text:
+            await cleanup_and_answer(
+                message, state, "Некорректный номер. Попробуйте снова.", scheduler=scheduler
+            )
+            return
+        await _apply_title(message, state, bot, session_maker, scheduler, poll_id, text)
+        return
+
+    if index < 0 or index >= len(option_ids):
         await cleanup_and_answer(
             message, state, "Некорректный номер. Попробуйте снова.", scheduler=scheduler
         )
         return
 
-    await state.update_data(option_id=option_id)
+    await state.update_data(option_id=option_ids[index])
     await state.set_state(EditPollStates.waiting_action)
     await cleanup_and_answer(
         message, state, "Что сделать с вариантом? Ответьте: text / date / delete", scheduler=scheduler
@@ -377,6 +391,41 @@ async def apply_new_date(message: Message, state: FSMContext, bot: Bot, session_
         message,
         state,
         "Дата варианта обновлена." if success else _PARTIAL_FAILURE_MESSAGE,
+        scheduler=scheduler,
+    )
+
+
+async def _apply_title(
+    message: Message, state: FSMContext, bot: Bot, session_maker, scheduler, poll_id: int, new_title: str
+) -> None:
+    async with session_maker() as session:
+        poll = await repo.get_poll(session, poll_id)
+        if poll is None:
+            await cleanup_and_finish(message, state, _POLL_GONE_MESSAGE, scheduler=scheduler)
+            return
+
+        await repo.edit_poll_title(session, poll_id, new_title)
+        poll = await repo.get_poll(session, poll_id)
+        poll_options = await repo.get_poll_options(session, poll_id)
+        counts = {opt.id: await repo.get_vote_count(session, opt.id) for opt in poll_options}
+        voters_by_option = {
+            opt.id: [
+                formatting.voter_mention(v.username, v.first_name)
+                for v in await repo.get_voters(session, opt.id)
+            ]
+            for opt in poll_options
+        }
+
+    # Renaming touches only the poll heading, not any option a voter chose, so
+    # there's no per-option change to notify about -- just refresh the message.
+    success = await _refresh_and_notify(
+        bot, poll, poll_options, counts, voters_by_option, [], None, session_maker
+    )
+
+    await cleanup_and_finish(
+        message,
+        state,
+        "Название опроса обновлено." if success else _PARTIAL_FAILURE_MESSAGE,
         scheduler=scheduler,
     )
 
