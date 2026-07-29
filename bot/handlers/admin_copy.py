@@ -17,7 +17,7 @@ from sqlalchemy import select
 
 from bot import repo
 from bot.handlers.admin_create import create_and_publish_poll
-from bot.handlers.dialog_cleanup import cleanup_and_answer
+from bot.handlers.dialog_cleanup import cleanup_and_answer, cleanup_and_finish
 from bot.models import Poll
 
 router = Router(name="admin_copy")
@@ -36,13 +36,13 @@ async def start_copy_poll(
     message: Message, state: FSMContext, admin_id: int, session_maker, scheduler=None
 ) -> None:
     if not _is_admin(message, admin_id):
-        await cleanup_and_answer(
+        await cleanup_and_finish(
             message, state, "Эта команда доступна только администратору.", scheduler=scheduler
         )
         return
 
     if message.chat.type == "private":
-        await cleanup_and_answer(
+        await cleanup_and_finish(
             message,
             state,
             "Эта команда работает только в группе, в теме которую нужно скопировать опрос.",
@@ -55,7 +55,7 @@ async def start_copy_poll(
         polls = list(result.scalars().all())
 
     if not polls:
-        await cleanup_and_answer(message, state, "Активных опросов нет.", scheduler=scheduler)
+        await cleanup_and_finish(message, state, "Активных опросов нет.", scheduler=scheduler)
         return
 
     lines = [f"{i + 1}. {poll.title} (id={poll.id})" for i, poll in enumerate(polls)]

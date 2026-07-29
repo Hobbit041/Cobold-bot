@@ -19,7 +19,7 @@ from aiogram.types import Message
 from sqlalchemy import select
 
 from bot import date_utils, formatting, keyboards, repo
-from bot.handlers.dialog_cleanup import cleanup_and_answer
+from bot.handlers.dialog_cleanup import cleanup_and_answer, cleanup_and_finish
 from bot.models import Poll
 from bot.scheduler import cancel_threshold_check
 
@@ -52,7 +52,7 @@ async def start_edit_poll(
     message: Message, state: FSMContext, admin_id: int, session_maker, scheduler=None
 ) -> None:
     if not _is_admin(message, admin_id):
-        await cleanup_and_answer(
+        await cleanup_and_finish(
             message, state, "Эта команда доступна только администратору.", scheduler=scheduler
         )
         return
@@ -62,7 +62,7 @@ async def start_edit_poll(
         polls = list(result.scalars().all())
 
     if not polls:
-        await cleanup_and_answer(message, state, "Активных опросов нет.", scheduler=scheduler)
+        await cleanup_and_finish(message, state, "Активных опросов нет.", scheduler=scheduler)
         return
 
     lines = [f"{i + 1}. {poll.title} (id={poll.id})" for i, poll in enumerate(polls)]
@@ -147,8 +147,7 @@ async def receive_new_option(
     # unlike edit/delete, only the poll message itself needs refreshing.
     success = await _refresh_and_notify(bot, poll, poll_options, counts, voters_by_option, [], None, session_maker)
 
-    await state.clear()
-    await cleanup_and_answer(
+    await cleanup_and_finish(
         message, state, "Вариант добавлен." if success else _PARTIAL_FAILURE_MESSAGE, scheduler=scheduler
     )
 
@@ -209,8 +208,7 @@ async def apply_new_order(message: Message, state: FSMContext, bot: Bot, session
     async with session_maker() as session:
         current_options = await repo.get_poll_options(session, poll_id)
         if {opt.id for opt in current_options} != set(ordered_option_ids):
-            await state.clear()
-            await cleanup_and_answer(message, state, _OPTION_GONE_MESSAGE, scheduler=scheduler)
+            await cleanup_and_finish(message, state, _OPTION_GONE_MESSAGE, scheduler=scheduler)
             return
 
         await repo.reorder_options(session, ordered_option_ids)
@@ -229,8 +227,7 @@ async def apply_new_order(message: Message, state: FSMContext, bot: Bot, session
         bot, poll, poll_options, counts, voters_by_option, [], None, session_maker
     )
 
-    await state.clear()
-    await cleanup_and_answer(
+    await cleanup_and_finish(
         message,
         state,
         "Порядок вариантов обновлён." if success else _PARTIAL_FAILURE_MESSAGE,
@@ -300,8 +297,7 @@ async def apply_new_text(message: Message, state: FSMContext, bot: Bot, session_
     async with session_maker() as session:
         option = await session.get(repo.Option, option_id)
         if option is None:
-            await state.clear()
-            await cleanup_and_answer(message, state, _OPTION_GONE_MESSAGE, scheduler=scheduler)
+            await cleanup_and_finish(message, state, _OPTION_GONE_MESSAGE, scheduler=scheduler)
             return
 
         old_text = option.text
@@ -328,8 +324,7 @@ async def apply_new_text(message: Message, state: FSMContext, bot: Bot, session_
         bot, poll, poll_options, counts, voters_by_option, voters, notification_text, session_maker
     )
 
-    await state.clear()
-    await cleanup_and_answer(
+    await cleanup_and_finish(
         message, state, "Вариант обновлён." if success else _PARTIAL_FAILURE_MESSAGE, scheduler=scheduler
     )
 
@@ -352,8 +347,7 @@ async def apply_new_date(message: Message, state: FSMContext, bot: Bot, session_
     async with session_maker() as session:
         option = await session.get(repo.Option, option_id)
         if option is None:
-            await state.clear()
-            await cleanup_and_answer(message, state, _OPTION_GONE_MESSAGE, scheduler=scheduler)
+            await cleanup_and_finish(message, state, _OPTION_GONE_MESSAGE, scheduler=scheduler)
             return
 
         old_date = option.date
@@ -379,8 +373,7 @@ async def apply_new_date(message: Message, state: FSMContext, bot: Bot, session_
         bot, poll, poll_options, counts, voters_by_option, voters, notification_text, session_maker
     )
 
-    await state.clear()
-    await cleanup_and_answer(
+    await cleanup_and_finish(
         message,
         state,
         "Дата варианта обновлена." if success else _PARTIAL_FAILURE_MESSAGE,
@@ -392,8 +385,7 @@ async def _apply_delete(message: Message, state: FSMContext, bot: Bot, session_m
     async with session_maker() as session:
         option = await session.get(repo.Option, option_id)
         if option is None:
-            await state.clear()
-            await cleanup_and_answer(message, state, _OPTION_GONE_MESSAGE, scheduler=scheduler)
+            await cleanup_and_finish(message, state, _OPTION_GONE_MESSAGE, scheduler=scheduler)
             return
 
         option_text = option.text
@@ -422,8 +414,7 @@ async def _apply_delete(message: Message, state: FSMContext, bot: Bot, session_m
         bot, poll, poll_options, counts, voters_by_option, voters, notification_text, session_maker
     )
 
-    await state.clear()
-    await cleanup_and_answer(
+    await cleanup_and_finish(
         message, state, "Вариант удалён." if success else _PARTIAL_FAILURE_MESSAGE, scheduler=scheduler
     )
 

@@ -1,5 +1,6 @@
 import datetime as dt
 from unittest.mock import AsyncMock
+from zoneinfo import ZoneInfo
 
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
@@ -7,6 +8,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot import repo
 from bot.handlers.admin_delete import DeletePollStates, select_poll_to_delete, start_delete_poll
+from bot.scheduler import create_scheduler, message_deletion_job_id
 
 
 class FakeChat:
@@ -153,6 +155,40 @@ async def test_select_poll_to_delete_still_cleans_db_when_message_already_gone(s
     message.answer.assert_awaited_once_with("Опрос удалён.")
     async with session_maker() as session:
         assert await repo.get_poll(session, poll_id) is None
+
+
+async def test_select_poll_to_delete_in_group_cleans_prompt_and_schedules_confirmation(
+    session_maker, tmp_path
+):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=100, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+        poll_id = poll.id
+
+    state = _state()
+    await state.set_state(DeletePollStates.waiting_poll_selection)
+    # last_bot_message_id is the "Какой опрос удалить?" prompt that used to be
+    # left hanging because the handler cleared state before cleaning up.
+    await state.update_data(poll_ids=[poll_id], last_bot_message_id=777)
+
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
+    fake_bot = AsyncMock()
+    message = FakeMessage("1", chat_type="supergroup", chat_id=-500, message_id=88)
+    sent = type("Sent", (), {"message_id": 900})()
+    message.answer.return_value = sent
+
+    await select_poll_to_delete(
+        message, state, bot=fake_bot, session_maker=session_maker, scheduler=scheduler
+    )
+
+    # The lingering prompt is deleted, and the "Опрос удалён." confirmation is
+    # scheduled to auto-delete.
+    message.bot.delete_message.assert_awaited_once_with(chat_id=-500, message_id=777)
+    message.answer.assert_awaited_once_with("Опрос удалён.")
+    assert await state.get_state() is None
+    assert scheduler.get_job(message_deletion_job_id(-500, 900)) is not None
 
 
 async def test_select_poll_to_delete_when_poll_already_gone(session_maker):

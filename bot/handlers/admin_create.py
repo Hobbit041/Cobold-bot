@@ -16,7 +16,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 
 from bot import date_utils, formatting, keyboards, repo
-from bot.handlers.dialog_cleanup import cleanup_and_answer
+from bot.handlers.dialog_cleanup import cleanup_and_answer, cleanup_and_finish
 
 router = Router(name="admin_create")
 
@@ -34,7 +34,7 @@ def _is_admin(message: Message, admin_id: int) -> bool:
 @router.message(Command("newpoll"))
 async def start_create_poll(message: Message, state: FSMContext, admin_id: int, scheduler=None) -> None:
     if not _is_admin(message, admin_id):
-        await cleanup_and_answer(
+        await cleanup_and_finish(
             message, state, "Эта команда доступна только администратору.", scheduler=scheduler
         )
         return
@@ -224,5 +224,4 @@ async def create_and_publish_poll(
 
         await repo.set_poll_message(session, poll.id, sent.message_id)
 
-    await state.clear()
-    await cleanup_and_answer(message, state, "Опрос создан и опубликован!", scheduler=scheduler)
+    await cleanup_and_finish(message, state, "Опрос создан и опубликован!", scheduler=scheduler)
