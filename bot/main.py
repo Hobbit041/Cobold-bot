@@ -57,6 +57,14 @@ async def main() -> None:
     load_dotenv()
     config = load_config()
 
+    # SQLite won't create missing parent directories. On bothost.ru the
+    # persistent volume /app/data exists, but creating it here is a cheap
+    # safety net and also covers first-run local setups.
+    for _db_file in (config.db_path, config.jobs_db_path):
+        _parent = os.path.dirname(_db_file)
+        if _parent:
+            os.makedirs(_parent, exist_ok=True)
+
     engine, session_maker = create_engine_and_sessionmaker(config.db_path)
     await init_db(engine)
 
