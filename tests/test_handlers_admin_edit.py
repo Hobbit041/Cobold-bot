@@ -571,6 +571,77 @@ async def test_apply_new_text_marks_poll_orphaned_when_message_not_found(session
         assert refreshed.status == "orphaned"
 
 
+async def test_select_option_non_numeric_renames_poll_and_refreshes_message(session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=100, title="Старое название", options=[("A", dt.date(2026, 7, 24))]
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+        options = await repo.get_poll_options(session, poll.id)
+        poll_id = poll.id
+
+    state = _state()
+    await state.set_state(EditPollStates.waiting_option_selection)
+    await state.update_data(poll_id=poll_id, option_ids=[opt.id for opt in options])
+
+    fake_bot = AsyncMock()
+    message = FakeMessage("Новое название")
+
+    await select_option(message, state, bot=fake_bot, session_maker=session_maker)
+
+    async with session_maker() as session:
+        assert (await repo.get_poll(session, poll_id)).title == "Новое название"
+    fake_bot.edit_message_text.assert_awaited_once()
+    message.answer.assert_awaited_once_with("Название опроса обновлено.")
+    assert await state.get_state() is None
+
+
+async def test_select_option_out_of_range_number_still_errors_without_renaming(session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=100, title="Старое название", options=[("A", dt.date(2026, 7, 24))]
+        )
+        options = await repo.get_poll_options(session, poll.id)
+        poll_id = poll.id
+
+    state = _state()
+    await state.set_state(EditPollStates.waiting_option_selection)
+    await state.update_data(poll_id=poll_id, option_ids=[opt.id for opt in options])
+
+    fake_bot = AsyncMock()
+    message = FakeMessage("5")
+
+    await select_option(message, state, bot=fake_bot, session_maker=session_maker)
+
+    message.answer.assert_awaited_once_with("Некорректный номер. Попробуйте снова.")
+    assert await state.get_state() == EditPollStates.waiting_option_selection.state
+    async with session_maker() as session:
+        assert (await repo.get_poll(session, poll_id)).title == "Старое название"
+
+
+async def test_select_option_empty_text_errors_without_renaming(session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=100, title="Старое название", options=[("A", dt.date(2026, 7, 24))]
+        )
+        options = await repo.get_poll_options(session, poll.id)
+        poll_id = poll.id
+
+    state = _state()
+    await state.set_state(EditPollStates.waiting_option_selection)
+    await state.update_data(poll_id=poll_id, option_ids=[opt.id for opt in options])
+
+    fake_bot = AsyncMock()
+    message = FakeMessage("   ")
+
+    await select_option(message, state, bot=fake_bot, session_maker=session_maker)
+
+    message.answer.assert_awaited_once_with("Некорректный номер. Попробуйте снова.")
+    assert await state.get_state() == EditPollStates.waiting_option_selection.state
+    async with session_maker() as session:
+        assert (await repo.get_poll(session, poll_id)).title == "Старое название"
+
+
 async def test_revoll_reorders_options_and_refreshes_message(tmp_path, session_maker):
     async with session_maker() as session:
         poll = await repo.create_poll(

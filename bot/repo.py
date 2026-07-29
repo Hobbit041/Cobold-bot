@@ -134,6 +134,14 @@ async def get_voters(session: AsyncSession, option_id: int) -> list[Vote]:
 # --- Edit / delete option ---------------------------------------------------
 
 
+async def edit_poll_title(session: AsyncSession, poll_id: int, new_title: str) -> Poll:
+    poll = await session.get(Poll, poll_id)
+    poll.title = new_title
+    await session.commit()
+    await session.refresh(poll)
+    return poll
+
+
 async def edit_option_text(session: AsyncSession, option_id: int, new_text: str) -> Option:
     option = await session.get(Option, option_id)
     option.text = new_text
