@@ -5,8 +5,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from bot.handlers.dialog_cleanup import cleanup_and_answer
-from bot.scheduler import create_scheduler, dialog_timeout_job_id
+from bot.handlers.dialog_cleanup import cleanup_and_answer, cleanup_and_finish
+from bot.scheduler import (
+    create_scheduler,
+    dialog_timeout_job_id,
+    message_deletion_job_id,
+    schedule_dialog_timeout,
+)
 
 
 class FakeChat:
@@ -131,4 +136,85 @@ async def test_group_chat_without_scheduler_does_not_error(tmp_path):
 
     result = await cleanup_and_answer(message, state, "hello")
 
+    assert result is message.answer.return_value
+
+
+def _noop_dialog_timeout(chat_id, user_id, message_thread_id):
+    pass
+
+
+async def test_finish_private_chat_answers_and_clears_without_deleting_or_scheduling(tmp_path):
+    message = FakeMessage(chat_type="private")
+    state = _state()
+    await state.set_state("EditPollStates:waiting_new_text")
+    await state.update_data(last_bot_message_id=42)
+    scheduler = _scheduler(tmp_path)
+    message.answer.return_value = type("Sent", (), {"message_id": 500})()
+
+    result = await cleanup_and_finish(message, state, "Вариант обновлён.", scheduler=scheduler)
+
+    message.answer.assert_awaited_once_with("Вариант обновлён.")
+    message.delete.assert_not_awaited()
+    message.bot.delete_message.assert_not_awaited()
+    assert await state.get_state() is None
+    assert scheduler.get_job(message_deletion_job_id(1, 500)) is None
+    assert result is message.answer.return_value
+
+
+async def test_finish_group_deletes_prompt_clears_state_and_schedules_deletion(tmp_path):
+    message = FakeMessage(chat_type="supergroup", chat_id=-100, message_id=70, user_id=7)
+    state = _state()
+    await state.set_state("EditPollStates:waiting_new_text")
+    await state.update_data(last_bot_message_id=42, option_id=5)
+    scheduler = _scheduler(tmp_path)
+    sent = type("Sent", (), {"message_id": 900})()
+    message.answer.return_value = sent
+
+    await cleanup_and_finish(message, state, "Вариант удалён.", scheduler=scheduler)
+
+    message.delete.assert_awaited_once()  # the admin's triggering message
+    message.bot.delete_message.assert_awaited_once_with(chat_id=-100, message_id=42)  # the lingering prompt
+    message.answer.assert_awaited_once_with("Вариант удалён.")
+    assert await state.get_state() is None
+    assert await state.get_data() == {}
+    assert scheduler.get_job(message_deletion_job_id(-100, 900)) is not None
+
+
+async def test_finish_group_cancels_pending_dialog_timeout(tmp_path):
+    message = FakeMessage(chat_type="group", chat_id=-100, message_id=71, user_id=7)
+    state = _state()
+    scheduler = _scheduler(tmp_path)
+    schedule_dialog_timeout(scheduler, -100, 7, None, callback=_noop_dialog_timeout)
+    message.answer.return_value = type("Sent", (), {"message_id": 901})()
+
+    await cleanup_and_finish(message, state, "Действие отменено.", scheduler=scheduler)
+
+    assert scheduler.get_job(dialog_timeout_job_id(-100, 7)) is None
+
+
+async def test_finish_group_survives_delete_failures(tmp_path):
+    message = FakeMessage(chat_type="group", chat_id=-100, message_id=72)
+    message.delete.side_effect = Exception("message can't be deleted")
+    message.bot.delete_message.side_effect = Exception("message to delete not found")
+    state = _state()
+    await state.update_data(last_bot_message_id=42)
+    scheduler = _scheduler(tmp_path)
+    sent = type("Sent", (), {"message_id": 902})()
+    message.answer.return_value = sent
+
+    result = await cleanup_and_finish(message, state, "ok", scheduler=scheduler)
+
+    message.answer.assert_awaited_once_with("ok")
+    assert result is sent
+
+
+async def test_finish_without_scheduler_clears_and_does_not_error():
+    message = FakeMessage(chat_type="group", chat_id=-100, message_id=73)
+    state = _state()
+    await state.set_state("EditPollStates:waiting_new_text")
+    message.answer.return_value = type("Sent", (), {"message_id": 903})()
+
+    result = await cleanup_and_finish(message, state, "done")
+
+    assert await state.get_state() is None
     assert result is message.answer.return_value

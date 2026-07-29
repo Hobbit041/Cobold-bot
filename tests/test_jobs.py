@@ -280,6 +280,32 @@ async def test_expire_dialog_is_module_level_and_pickleable_by_reference():
     assert jobs.expire_dialog.__qualname__ == "expire_dialog"
 
 
+async def test_delete_message_deletes_the_message(session_maker):
+    fake_bot = FakeBot(id=1)
+    jobs.configure(fake_bot, session_maker, admin_mention="@admin", timezone=ZoneInfo("Europe/Moscow"))
+
+    await jobs.delete_message(-100, 555)
+
+    assert fake_bot.deleted_messages == [(-100, 555)]
+
+
+async def test_delete_message_swallows_failures(session_maker):
+    class FailingDeleteBot(FakeBot):
+        async def delete_message(self, chat_id, message_id):
+            raise RuntimeError("message to delete not found")
+
+    fake_bot = FailingDeleteBot(id=1)
+    jobs.configure(fake_bot, session_maker, admin_mention="@admin", timezone=ZoneInfo("Europe/Moscow"))
+
+    # Must not raise: a confirmation the admin already deleted by hand, or a
+    # transient API error, should not crash the scheduler's job executor.
+    await jobs.delete_message(-100, 555)
+
+
+async def test_delete_message_is_module_level_and_pickleable_by_reference():
+    assert jobs.delete_message.__qualname__ == "delete_message"
+
+
 async def test_check_threshold_tracks_itself_in_in_flight_jobs_while_running(session_maker):
     async with session_maker() as session:
         poll = await repo.create_poll(
