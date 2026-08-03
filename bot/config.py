@@ -54,7 +54,7 @@ def load_config() -> Config:
     data_dir = os.environ.get("DATA_DIR", "")
     db_path = _resolve_data_path(os.environ.get("DB_PATH", "poll_bot.sqlite3"), data_dir)
     jobs_db_path = _resolve_data_path(os.environ.get("JOBS_DB_PATH", "jobs.sqlite3"), data_dir)
-    threshold_debounce_seconds = int(os.environ.get("THRESHOLD_DEBOUNCE_SECONDS", "900"))
+    threshold_debounce_seconds = int(os.environ.get("THRESHOLD_DEBOUNCE_SECONDS", "300"))
 
     return Config(
         bot_token=bot_token,

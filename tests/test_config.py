@@ -38,7 +38,7 @@ def test_load_config_missing_token_raises(monkeypatch):
         load_config()
 
 
-def test_load_config_defaults_threshold_debounce_seconds_to_900(monkeypatch):
+def test_load_config_defaults_threshold_debounce_seconds_to_300(monkeypatch):
     monkeypatch.setenv("BOT_TOKEN", "test-token")
     monkeypatch.setenv("ADMIN_ID", "42")
     monkeypatch.setenv("ADMIN_USERNAME", "admin_user")
@@ -46,7 +46,7 @@ def test_load_config_defaults_threshold_debounce_seconds_to_900(monkeypatch):
 
     config = load_config()
 
-    assert config.threshold_debounce_seconds == 900
+    assert config.threshold_debounce_seconds == 300
 
 
 def test_relative_db_paths_resolve_under_data_dir(monkeypatch):
