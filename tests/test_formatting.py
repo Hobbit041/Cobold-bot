@@ -1,6 +1,10 @@
 import datetime as dt
 
 from bot.formatting import (
+    build_message_link,
+    checkme_empty_text,
+    checkme_header,
+    checkme_line,
     format_option_line,
     option_date_changed_notification,
     option_deleted_notification,
@@ -134,3 +138,30 @@ def test_reminder_text_lists_participants():
         "Напоминаю, что завтра, 25 июля, состоится игра! "
         "Пожалуйста, подтвердите участие реакцией на это сообщение:\n@alice\nBob"
     )
+
+
+def test_build_message_link_with_username():
+    assert build_message_link(-1001234567890, 42, "somechat") == "https://t.me/somechat/42"
+
+
+def test_build_message_link_supergroup_without_username():
+    assert build_message_link(-1001234567890, 42, None) == "https://t.me/c/1234567890/42"
+
+
+def test_build_message_link_basic_group_without_username_returns_none():
+    assert build_message_link(-123456789, 42, None) is None
+
+
+def test_checkme_line_escapes_and_links():
+    line = checkme_line(1, "Настолки <3", dt.date(2026, 8, 22), "Компания А & Ко", "https://t.me/c/1/2")
+    assert line == (
+        '1. <a href="https://t.me/c/1/2">22 августа, Настолки &lt;3</a> (Компания А &amp; Ко)'
+    )
+
+
+def test_checkme_header_escapes():
+    assert checkme_header("Alice & Bob") == "Alice &amp; Bob, вы записаны:"
+
+
+def test_checkme_empty_text_escapes():
+    assert checkme_empty_text("Alice & Bob") == "Alice &amp; Bob, у вас нет записей на игры."

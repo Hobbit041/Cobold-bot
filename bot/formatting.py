@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import html
 
 from bot.date_utils import format_date_ru
 
@@ -91,3 +92,27 @@ def reminder_text(option_date: dt.date, participant_mentions: list[str]) -> str:
         f"Напоминаю, что завтра, {format_date_ru(option_date)}, состоится игра! "
         f"Пожалуйста, подтвердите участие реакцией на это сообщение:\n{participants_block}"
     )
+
+
+def build_message_link(chat_id: int, message_id: int, username: str | None) -> str | None:
+    if username:
+        return f"https://t.me/{username}/{message_id}"
+    chat_id_str = str(chat_id)
+    if chat_id_str.startswith("-100"):
+        return f"https://t.me/c/{chat_id_str[4:]}/{message_id}"
+    return None
+
+
+def checkme_line(
+    index: int, option_text: str, option_date: dt.date, chat_title: str, link: str
+) -> str:
+    label = f"{format_date_ru(option_date)}, {html.escape(option_text)}"
+    return f'{index}. <a href="{html.escape(link)}">{label}</a> ({html.escape(chat_title)})'
+
+
+def checkme_header(mention: str) -> str:
+    return f"{html.escape(mention)}, вы записаны:"
+
+
+def checkme_empty_text(mention: str) -> str:
+    return f"{html.escape(mention)}, у вас нет записей на игры."
