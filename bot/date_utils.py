@@ -56,6 +56,10 @@ def format_date_ru(d: dt.date) -> str:
     return f"{d.day} {MONTHS_RU[d.month]}"
 
 
+def format_date_ru_with_year(d: dt.date) -> str:
+    return f"{d.day} {MONTHS_RU[d.month]} {d.year}"
+
+
 def parse_option_input(text: str) -> tuple[str, dt.date | None]:
     """Parse a "Текст | ДД.ММ.ГГГГ" line (| / \\ all accepted as separator).
 

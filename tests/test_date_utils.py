@@ -2,7 +2,13 @@ import datetime as dt
 
 import pytest
 
-from bot.date_utils import DateParseError, format_date_ru, parse_date_input, parse_option_input
+from bot.date_utils import (
+    DateParseError,
+    format_date_ru,
+    format_date_ru_with_year,
+    parse_date_input,
+    parse_option_input,
+)
 
 
 def test_parse_full_date():
@@ -89,3 +95,7 @@ def test_parse_option_input_blank_text_raises():
 def test_parse_option_input_blank_text_before_separator_raises():
     with pytest.raises(DateParseError):
         parse_option_input(" | 24.07.2026")
+
+
+def test_format_date_ru_with_year():
+    assert format_date_ru_with_year(dt.date(2026, 8, 23)) == "23 августа 2026"
