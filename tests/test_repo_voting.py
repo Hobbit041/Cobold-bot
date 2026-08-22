@@ -1,4 +1,5 @@
 import datetime as dt
+from zoneinfo import ZoneInfo
 
 from bot import repo
 
@@ -77,3 +78,51 @@ async def test_get_votes_by_user_with_no_votes_returns_empty_list(session_maker)
         rows = await repo.get_votes_by_user(session, user_id=999)
 
     assert rows == []
+
+
+async def test_get_votes_by_user_on_or_after_includes_today_and_future_excludes_past(session_maker):
+    today = dt.datetime.now(ZoneInfo("Europe/Moscow")).date()
+    async with session_maker() as session:
+        poll_today = await repo.create_poll(
+            session, chat_id=100, title="Сегодня", options=[("Сегодня", today)]
+        )
+        poll_future = await repo.create_poll(
+            session, chat_id=100, title="Будущее", options=[("Будущее", today + dt.timedelta(days=1))]
+        )
+        poll_past = await repo.create_poll(
+            session, chat_id=100, title="Прошлое", options=[("Прошлое", today - dt.timedelta(days=1))]
+        )
+        option_today = (await repo.get_poll_options(session, poll_today.id))[0]
+        option_future = (await repo.get_poll_options(session, poll_future.id))[0]
+        option_past = (await repo.get_poll_options(session, poll_past.id))[0]
+        await repo.toggle_vote(session, option_today.id, user_id=1, username="alice", first_name="Alice")
+        await repo.toggle_vote(session, option_future.id, user_id=1, username="alice", first_name="Alice")
+        await repo.toggle_vote(session, option_past.id, user_id=1, username="alice", first_name="Alice")
+
+        rows = await repo.get_votes_by_user(session, user_id=1, on_or_after=today)
+
+    assert [option.id for _, option in rows] == [option_today.id, option_future.id]
+
+
+async def test_get_votes_by_user_before_includes_past_excludes_today_and_future(session_maker):
+    today = dt.datetime.now(ZoneInfo("Europe/Moscow")).date()
+    async with session_maker() as session:
+        poll_today = await repo.create_poll(
+            session, chat_id=100, title="Сегодня", options=[("Сегодня", today)]
+        )
+        poll_future = await repo.create_poll(
+            session, chat_id=100, title="Будущее", options=[("Будущее", today + dt.timedelta(days=1))]
+        )
+        poll_past = await repo.create_poll(
+            session, chat_id=100, title="Прошлое", options=[("Прошлое", today - dt.timedelta(days=1))]
+        )
+        option_today = (await repo.get_poll_options(session, poll_today.id))[0]
+        option_future = (await repo.get_poll_options(session, poll_future.id))[0]
+        option_past = (await repo.get_poll_options(session, poll_past.id))[0]
+        await repo.toggle_vote(session, option_today.id, user_id=1, username="alice", first_name="Alice")
+        await repo.toggle_vote(session, option_future.id, user_id=1, username="alice", first_name="Alice")
+        await repo.toggle_vote(session, option_past.id, user_id=1, username="alice", first_name="Alice")
+
+        rows = await repo.get_votes_by_user(session, user_id=1, before=today)
+
+    assert [option.id for _, option in rows] == [option_past.id]

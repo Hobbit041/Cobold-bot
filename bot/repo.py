@@ -131,16 +131,22 @@ async def get_voters(session: AsyncSession, option_id: int) -> list[Vote]:
     return list(result.scalars().all())
 
 
-async def get_votes_by_user(session: AsyncSession, user_id: int) -> list[tuple[Poll, Option]]:
+async def get_votes_by_user(
+    session: AsyncSession,
+    user_id: int,
+    on_or_after: dt.date | None = None,
+    before: dt.date | None = None,
+) -> list[tuple[Poll, Option]]:
+    conditions = [Vote.user_id == user_id, Option.is_deleted.is_(False), Option.date.isnot(None)]
+    if on_or_after is not None:
+        conditions.append(Option.date >= on_or_after)
+    if before is not None:
+        conditions.append(Option.date < before)
     result = await session.execute(
         select(Poll, Option)
         .join(Option, Option.poll_id == Poll.id)
         .join(Vote, Vote.option_id == Option.id)
-        .where(
-            Vote.user_id == user_id,
-            Option.is_deleted.is_(False),
-            Option.date.isnot(None),
-        )
+        .where(*conditions)
         .order_by(Option.date, Poll.chat_id, Option.position)
     )
     return list(result.all())
