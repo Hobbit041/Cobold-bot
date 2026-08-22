@@ -38,20 +38,11 @@ def _noop_dialog_timeout(chat_id, user_id, message_thread_id):
     pass
 
 
-async def test_cancel_rejects_non_admin():
-    message = FakeMessage(user_id=2)
-    state = _state()
-
-    await cancel_dialog(message, state, admin_id=1)
-
-    message.answer.assert_awaited_once_with("Эта команда доступна только администратору.")
-
-
 async def test_cancel_with_no_active_dialog_says_nothing_to_cancel():
     message = FakeMessage(user_id=1)
     state = _state()
 
-    await cancel_dialog(message, state, admin_id=1)
+    await cancel_dialog(message, state)
 
     message.answer.assert_awaited_once_with("Нечего отменять.")
 
@@ -62,7 +53,7 @@ async def test_cancel_clears_active_create_poll_dialog():
     await state.set_state(CreatePollStates.waiting_options)
     await state.update_data(options=[{"text": "24.07", "date": "2026-07-24"}])
 
-    await cancel_dialog(message, state, admin_id=1)
+    await cancel_dialog(message, state)
 
     assert await state.get_state() is None
     message.answer.assert_awaited_once_with("Действие отменено.")
@@ -76,8 +67,22 @@ async def test_cancel_in_group_deletes_messages_and_cancels_pending_timeout(tmp_
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
     schedule_dialog_timeout(scheduler, -500, 1, None, callback=_noop_dialog_timeout)
 
-    await cancel_dialog(message, state, admin_id=1, scheduler=scheduler)
+    await cancel_dialog(message, state, scheduler=scheduler)
 
     message.delete.assert_awaited_once()
     assert await state.get_state() is None
     assert scheduler.get_job(dialog_timeout_job_id(-500, 1)) is None
+
+
+async def test_cancel_needs_no_admin_check_state_is_already_scoped_to_caller():
+    # aiogram's FSM state is keyed by (chat_id, user_id), so whichever state
+    # object a /cancel handler receives already belongs to that same caller --
+    # there's no "someone else's dialog" it could ever reach.
+    message = FakeMessage(user_id=2)
+    state = _state()
+    await state.set_state(CreatePollStates.waiting_options)
+
+    await cancel_dialog(message, state)
+
+    assert await state.get_state() is None
+    message.answer.assert_awaited_once_with("Действие отменено.")
