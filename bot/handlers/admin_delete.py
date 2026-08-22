@@ -42,6 +42,8 @@ async def start_delete_poll(
         # Unlike /editpoll and /copypoll, deliberately not filtered to status
         # == "active" -- an already-"orphaned" poll must stay reachable here,
         # or it would be permanently unreachable/undeletable from any command.
+        # If the bot has been removed from a poll's chat, the poll is filtered
+        # out here via the chat-admin check below -- a known, accepted tradeoff.
         result = await session.execute(select(Poll))
         polls = list(result.scalars().all())
 
