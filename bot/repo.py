@@ -131,6 +131,21 @@ async def get_voters(session: AsyncSession, option_id: int) -> list[Vote]:
     return list(result.scalars().all())
 
 
+async def get_votes_by_user(session: AsyncSession, user_id: int) -> list[tuple[Poll, Option]]:
+    result = await session.execute(
+        select(Poll, Option)
+        .join(Option, Option.poll_id == Poll.id)
+        .join(Vote, Vote.option_id == Option.id)
+        .where(
+            Vote.user_id == user_id,
+            Option.is_deleted.is_(False),
+            Option.date.isnot(None),
+        )
+        .order_by(Option.date, Poll.chat_id, Option.position)
+    )
+    return list(result.all())
+
+
 # --- Edit / delete option ---------------------------------------------------
 
 

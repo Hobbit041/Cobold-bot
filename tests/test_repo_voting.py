@@ -1,3 +1,5 @@
+import datetime as dt
+
 from bot import repo
 
 
@@ -24,3 +26,54 @@ async def test_toggle_vote_counts_multiple_users(session_maker, poll_and_option)
         voters = await repo.get_voters(session, option_id)
         assert {v.user_id for v in voters} == {10, 11}
         assert await repo.get_vote_count(session, option_id) == 2
+
+
+async def test_get_votes_by_user_orders_by_date_and_excludes_dateless_and_other_users(session_maker):
+    async with session_maker() as session:
+        poll_a = await repo.create_poll(
+            session,
+            chat_id=100,
+            title="Игра А",
+            options=[("Позже", dt.date(2026, 9, 1)), ("Без даты", None)],
+        )
+        poll_b = await repo.create_poll(
+            session, chat_id=200, title="Игра Б", options=[("Раньше", dt.date(2026, 8, 1))]
+        )
+        options_a = await repo.get_poll_options(session, poll_a.id)
+        options_b = await repo.get_poll_options(session, poll_b.id)
+        dated_a, dateless_a = options_a[0], options_a[1]
+        dated_b = options_b[0]
+
+        await repo.toggle_vote(session, dated_a.id, user_id=1, username="alice", first_name="Alice")
+        await repo.toggle_vote(session, dateless_a.id, user_id=1, username="alice", first_name="Alice")
+        await repo.toggle_vote(session, dated_b.id, user_id=1, username="alice", first_name="Alice")
+        await repo.toggle_vote(session, dated_b.id, user_id=2, username="bob", first_name="Bob")
+
+        rows = await repo.get_votes_by_user(session, user_id=1)
+
+    assert [(poll.id, option.id) for poll, option in rows] == [
+        (poll_b.id, dated_b.id),
+        (poll_a.id, dated_a.id),
+    ]
+
+
+async def test_get_votes_by_user_excludes_deleted_option(session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=100, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+        option = (await repo.get_poll_options(session, poll.id))[0]
+        await repo.toggle_vote(session, option.id, user_id=1, username="alice", first_name="Alice")
+        option.is_deleted = True
+        await session.commit()
+
+        rows = await repo.get_votes_by_user(session, user_id=1)
+
+    assert rows == []
+
+
+async def test_get_votes_by_user_with_no_votes_returns_empty_list(session_maker):
+    async with session_maker() as session:
+        rows = await repo.get_votes_by_user(session, user_id=999)
+
+    assert rows == []
