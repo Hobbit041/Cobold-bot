@@ -1,4 +1,11 @@
-"""Admin-only conversation flow for creating a new poll via /newpoll.
+"""Conversation flow for creating a new poll via /newpoll.
+
+Available to any user; publishing into a chat other than a private DM with
+the bot requires being an admin/creator of that chat (bot.authz.is_chat_admin)
+-- when /newpoll is typed directly in a group, that check happens
+immediately; when it's typed in a DM, the target chat isn't known until
+receive_target_chat resolves it, so the check happens there instead, right
+before the poll is published.
 
 Thin aiogram glue: state transitions live here, but parsing/formatting/
 persistence logic is delegated to bot.date_utils / bot.formatting /
@@ -16,9 +23,12 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 
 from bot import date_utils, formatting, keyboards, repo
+from bot.authz import is_chat_admin
 from bot.handlers.dialog_cleanup import cleanup_and_answer, cleanup_and_finish
 
 router = Router(name="admin_create")
+
+_NOT_CHAT_ADMIN_MESSAGE = "Эта команда доступна только администраторам этого чата."
 
 
 class CreatePollStates(StatesGroup):
@@ -27,17 +37,13 @@ class CreatePollStates(StatesGroup):
     waiting_chat = State()
 
 
-def _is_admin(message: Message, admin_id: int) -> bool:
-    return message.from_user is not None and message.from_user.id == admin_id
-
-
 @router.message(Command("newpoll"))
-async def start_create_poll(message: Message, state: FSMContext, admin_id: int, scheduler=None) -> None:
-    if not _is_admin(message, admin_id):
-        await cleanup_and_finish(
-            message, state, "Эта команда доступна только администратору.", scheduler=scheduler
-        )
-        return
+async def start_create_poll(message: Message, state: FSMContext, bot: Bot, scheduler=None) -> None:
+    if message.chat.type != "private":
+        user_id = message.from_user.id if message.from_user is not None else None
+        if user_id is None or not await is_chat_admin(bot, message.chat.id, user_id):
+            await cleanup_and_finish(message, state, _NOT_CHAT_ADMIN_MESSAGE, scheduler=scheduler)
+            return
 
     await state.set_state(CreatePollStates.waiting_title)
     data = {"options": []}
@@ -148,6 +154,11 @@ async def receive_target_chat(message: Message, state: FSMContext, bot: Bot, ses
             "Не удалось определить чат. Перешлите сообщение из чата или пришлите его id.",
             scheduler=scheduler,
         )
+        return
+
+    user_id = message.from_user.id if message.from_user is not None else None
+    if user_id is None or not await is_chat_admin(bot, chat_id, user_id):
+        await cleanup_and_finish(message, state, _NOT_CHAT_ADMIN_MESSAGE, scheduler=scheduler)
         return
 
     data = await state.get_data()
