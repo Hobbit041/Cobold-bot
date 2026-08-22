@@ -103,7 +103,7 @@ def build_message_link(chat_id: int, message_id: int, username: str | None) -> s
     return None
 
 
-def checkme_line(
+def record_line(
     index: int, option_text: str, option_date: dt.date, chat_title: str, link: str
 ) -> str:
     label = f"{format_date_ru(option_date)}, {html.escape(option_text)}"
@@ -116,3 +116,11 @@ def checkme_header(mention: str) -> str:
 
 def checkme_empty_text(mention: str) -> str:
     return f"{html.escape(mention)}, у вас нет записей на игры."
+
+
+def mygames_header(mention: str) -> str:
+    return f"{html.escape(mention)}, вы играли:"
+
+
+def mygames_empty_text(mention: str) -> str:
+    return f"{html.escape(mention)}, у вас нет прошедших игр."

@@ -40,7 +40,7 @@ async def handle_checkme(message: Message, bot: Bot, session_maker) -> None:
         if link is None:
             continue
 
-        lines.append(formatting.checkme_line(len(lines) + 1, option.text, option.date, chat.title, link))
+        lines.append(formatting.record_line(len(lines) + 1, option.text, option.date, chat.title, link))
 
     if not lines:
         await message.answer(formatting.checkme_empty_text(mention), parse_mode="HTML")
