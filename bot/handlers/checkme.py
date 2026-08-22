@@ -9,6 +9,7 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
 from bot import formatting, keyboards, repo
+from bot.authz import is_chat_admin
 
 logger = logging.getLogger(__name__)
 
@@ -106,13 +107,7 @@ async def handle_delete_button(callback: CallbackQuery, bot: Bot) -> None:
     requester_id = int(callback.data.split(":", 1)[1])
     presser_id = callback.from_user.id
 
-    allowed = presser_id == requester_id
-    if not allowed:
-        try:
-            member = await bot.get_chat_member(callback.message.chat.id, presser_id)
-            allowed = member.status in ("administrator", "creator")
-        except Exception:
-            allowed = False
+    allowed = presser_id == requester_id or await is_chat_admin(bot, callback.message.chat.id, presser_id)
 
     if not allowed:
         await callback.answer()
