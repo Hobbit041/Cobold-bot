@@ -155,10 +155,18 @@ def test_build_message_link_basic_group_without_username_returns_none():
 
 
 def test_record_line_escapes_and_links():
-    line = record_line(1, "Настолки <3", dt.date(2026, 8, 22), "Компания А & Ко", "https://t.me/c/1/2")
+    line = record_line(1, "Настолки <3", dt.date(2026, 8, 22), "Компания А & Ко", 3, "https://t.me/c/1/2")
     assert line == (
-        '1. <a href="https://t.me/c/1/2">22 августа, Настолки &lt;3</a> (Компания А &amp; Ко)'
+        '1. <a href="https://t.me/c/1/2">22 августа, Настолки &lt;3</a> '
+        "(Компания А &amp; Ко, 3 игрока)"
     )
+
+
+def test_record_line_pluralizes_players_count():
+    cases = {1: "1 игрок", 2: "2 игрока", 5: "5 игроков", 11: "11 игроков", 21: "21 игрок"}
+    for count, expected in cases.items():
+        line = record_line(1, "Игра", dt.date(2026, 8, 22), "Чат", count, "https://t.me/c/1/2")
+        assert line.endswith(f"(Чат, {expected})"), f"count={count}: {line!r}"
 
 
 def test_checkme_header_escapes():

@@ -103,11 +103,23 @@ def build_message_link(chat_id: int, message_id: int, username: str | None) -> s
     return None
 
 
+def _pluralize_players(count: int) -> str:
+    if count % 10 == 1 and count % 100 != 11:
+        return "игрок"
+    if count % 10 in (2, 3, 4) and count % 100 not in (12, 13, 14):
+        return "игрока"
+    return "игроков"
+
+
 def record_line(
-    index: int, option_text: str, option_date: dt.date, chat_title: str, link: str
+    index: int, option_text: str, option_date: dt.date, chat_title: str, vote_count: int, link: str
 ) -> str:
     label = f"{format_date_ru(option_date)}, {html.escape(option_text)}"
-    return f'{index}. <a href="{html.escape(link)}">{label}</a> ({html.escape(chat_title)})'
+    players = f"{vote_count} {_pluralize_players(vote_count)}"
+    return (
+        f'{index}. <a href="{html.escape(link)}">{label}</a> '
+        f"({html.escape(chat_title)}, {players})"
+    )
 
 
 def checkme_header(mention: str) -> str:

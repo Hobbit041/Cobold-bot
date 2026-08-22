@@ -12,7 +12,9 @@ from bot import formatting, repo
 router = Router(name="checkme")
 
 
-async def _build_lines(bot: Bot, rows: list[tuple[repo.Poll, repo.Option]]) -> list[str]:
+async def _build_lines(
+    bot: Bot, rows: list[tuple[repo.Poll, repo.Option]], vote_counts: dict[int, int]
+) -> list[str]:
     chat_cache: dict[int, object | None] = {}
     lines: list[str] = []
     for poll, option in rows:
@@ -33,7 +35,11 @@ async def _build_lines(bot: Bot, rows: list[tuple[repo.Poll, repo.Option]]) -> l
         if link is None:
             continue
 
-        lines.append(formatting.record_line(len(lines) + 1, option.text, option.date, chat.title, link))
+        lines.append(
+            formatting.record_line(
+                len(lines) + 1, option.text, option.date, chat.title, vote_counts[option.id], link
+            )
+        )
     return lines
 
 
@@ -55,15 +61,18 @@ async def handle_checkme(message: Message, bot: Bot, session_maker, timezone: Zo
     today = dt.datetime.now(timezone).date()
     async with session_maker() as session:
         rows = await repo.get_votes_by_user(session, user.id, on_or_after=today)
+        vote_counts = {option.id: await repo.get_vote_count(session, option.id) for _, option in rows}
 
     mention = formatting.voter_mention(user.username, user.first_name)
-    lines = await _build_lines(bot, rows)
+    lines = await _build_lines(bot, rows, vote_counts)
     await _answer_with_lines(
         message, lines, formatting.checkme_header(mention), formatting.checkme_empty_text(mention)
     )
 
 
-@router.message(Command("mygames"))
+# Implemented and tested, but intentionally not wired to a Command filter:
+# /deletepoll purges votes outright, so /mygames can never show history for
+# polls removed that way -- disabled until players actually ask for it.
 async def handle_mygames(message: Message, bot: Bot, session_maker, timezone: ZoneInfo) -> None:
     user = message.from_user
     if user is None:
@@ -72,9 +81,10 @@ async def handle_mygames(message: Message, bot: Bot, session_maker, timezone: Zo
     today = dt.datetime.now(timezone).date()
     async with session_maker() as session:
         rows = await repo.get_votes_by_user(session, user.id, before=today)
+        vote_counts = {option.id: await repo.get_vote_count(session, option.id) for _, option in rows}
 
     mention = formatting.voter_mention(user.username, user.first_name)
-    lines = await _build_lines(bot, rows)
+    lines = await _build_lines(bot, rows, vote_counts)
     await _answer_with_lines(
         message, lines, formatting.mygames_header(mention), formatting.mygames_empty_text(mention)
     )

@@ -66,8 +66,8 @@ async def test_handle_checkme_lists_dated_votes_across_chats_ordered_by_date(ses
 
     message.answer.assert_awaited_once_with(
         "@alice, вы записаны:\n"
-        f'1. <a href="https://t.me/c/200/22">{format_date_ru(date_sooner)}, Раньше</a> (Компания Б)\n'
-        f'2. <a href="https://t.me/companya/11">{format_date_ru(date_later)}, Позже</a> (Компания А)',
+        f'1. <a href="https://t.me/c/200/22">{format_date_ru(date_sooner)}, Раньше</a> (Компания Б, 1 игрок)\n'
+        f'2. <a href="https://t.me/companya/11">{format_date_ru(date_later)}, Позже</a> (Компания А, 1 игрок)',
         parse_mode="HTML",
     )
 
@@ -103,7 +103,7 @@ async def test_handle_checkme_skips_row_when_get_chat_raises(session_maker):
 
     message.answer.assert_awaited_once_with(
         "@alice, вы записаны:\n"
-        f'1. <a href="https://t.me/companya/11">{format_date_ru(date_ok)}, Ок</a> (Компания А)',
+        f'1. <a href="https://t.me/companya/11">{format_date_ru(date_ok)}, Ок</a> (Компания А, 1 игрок)',
         parse_mode="HTML",
     )
 
@@ -160,7 +160,7 @@ async def test_handle_checkme_includes_todays_game(session_maker):
 
     message.answer.assert_awaited_once_with(
         "@alice, вы записаны:\n"
-        f'1. <a href="https://t.me/company/11">{format_date_ru(today)}, Сегодня</a> (Компания)',
+        f'1. <a href="https://t.me/company/11">{format_date_ru(today)}, Сегодня</a> (Компания, 1 игрок)',
         parse_mode="HTML",
     )
 
@@ -216,8 +216,8 @@ async def test_handle_mygames_lists_past_votes_across_chats_ordered_by_date(sess
 
     message.answer.assert_awaited_once_with(
         "@alice, вы играли:\n"
-        f'1. <a href="https://t.me/c/200/22">{format_date_ru(date_older)}, Раньше</a> (Компания Б)\n'
-        f'2. <a href="https://t.me/companya/11">{format_date_ru(date_newer)}, Позже</a> (Компания А)',
+        f'1. <a href="https://t.me/c/200/22">{format_date_ru(date_older)}, Раньше</a> (Компания Б, 1 игрок)\n'
+        f'2. <a href="https://t.me/companya/11">{format_date_ru(date_newer)}, Позже</a> (Компания А, 1 игрок)',
         parse_mode="HTML",
     )
 
@@ -253,7 +253,7 @@ async def test_handle_mygames_skips_row_when_get_chat_raises(session_maker):
 
     message.answer.assert_awaited_once_with(
         "@alice, вы играли:\n"
-        f'1. <a href="https://t.me/companya/11">{format_date_ru(date_ok)}, Ок</a> (Компания А)',
+        f'1. <a href="https://t.me/companya/11">{format_date_ru(date_ok)}, Ок</a> (Компания А, 1 игрок)',
         parse_mode="HTML",
     )
 
