@@ -1,9 +1,14 @@
-"""Admin-only /copypoll: copy an existing poll's title and options into the
-chat/topic where the command is run.
+"""/copypoll: copy an existing poll's title and options into the chat/topic
+where the command is run.
 
 Only works when run directly in a group (never in a private chat with the
 bot) -- unlike /newpoll's DM flow, there's no step here that lets a private
 conversation express *which* chat/topic the copy should be published into.
+Available to any admin/creator of the chat the command is run in (checked via
+bot.authz.is_chat_admin); the list of source polls offered is further
+filtered down to only those in chats the requester administers/created
+(bot.authz.filter_by_chat_admin), so /copypoll never reveals another chat's
+poll titles to someone who isn't that chat's admin.
 """
 
 from __future__ import annotations
@@ -16,31 +21,24 @@ from aiogram.types import Message
 from sqlalchemy import select
 
 from bot import repo
+from bot.authz import filter_by_chat_admin, is_chat_admin
 from bot.handlers.admin_create import create_and_publish_poll
 from bot.handlers.dialog_cleanup import cleanup_and_answer, cleanup_and_finish
 from bot.models import Poll
 
 router = Router(name="admin_copy")
 
+_NOT_CHAT_ADMIN_MESSAGE = "Эта команда доступна только администраторам этого чата."
+
 
 class CopyPollStates(StatesGroup):
     waiting_poll_selection = State()
 
 
-def _is_admin(message: Message, admin_id: int) -> bool:
-    return message.from_user is not None and message.from_user.id == admin_id
-
-
 @router.message(Command("copypoll"))
 async def start_copy_poll(
-    message: Message, state: FSMContext, admin_id: int, session_maker, scheduler=None
+    message: Message, state: FSMContext, bot: Bot, session_maker, scheduler=None
 ) -> None:
-    if not _is_admin(message, admin_id):
-        await cleanup_and_finish(
-            message, state, "Эта команда доступна только администратору.", scheduler=scheduler
-        )
-        return
-
     if message.chat.type == "private":
         await cleanup_and_finish(
             message,
@@ -50,9 +48,16 @@ async def start_copy_poll(
         )
         return
 
+    user_id = message.from_user.id if message.from_user is not None else None
+    if user_id is None or not await is_chat_admin(bot, message.chat.id, user_id):
+        await cleanup_and_finish(message, state, _NOT_CHAT_ADMIN_MESSAGE, scheduler=scheduler)
+        return
+
     async with session_maker() as session:
         result = await session.execute(select(Poll).where(Poll.status == "active"))
         polls = list(result.scalars().all())
+
+    polls = await filter_by_chat_admin(bot, polls, user_id, lambda p: p.chat_id)
 
     if not polls:
         await cleanup_and_finish(message, state, "Активных опросов нет.", scheduler=scheduler)

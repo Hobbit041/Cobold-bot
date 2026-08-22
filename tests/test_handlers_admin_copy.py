@@ -17,6 +17,11 @@ class FakeChat:
         self.type = type
 
 
+class FakeChatMember:
+    def __init__(self, status):
+        self.status = status
+
+
 class FakeMessage:
     def __init__(
         self, text, user_id=1, chat_type="private", chat_id=1, message_id=10, message_thread_id=None
@@ -37,13 +42,21 @@ def _state():
     return FSMContext(storage=storage, key=key)
 
 
-async def test_start_copy_poll_rejects_non_admin():
-    message = FakeMessage("/copypoll", user_id=2)
+def _admin_bot():
+    bot = AsyncMock()
+    bot.get_chat_member.return_value = FakeChatMember(status="administrator")
+    return bot
+
+
+async def test_start_copy_poll_rejects_non_chat_admin():
+    message = FakeMessage("/copypoll", user_id=2, chat_type="supergroup", chat_id=-500)
     state = _state()
+    fake_bot = AsyncMock()
+    fake_bot.get_chat_member.return_value = FakeChatMember(status="member")
 
-    await start_copy_poll(message, state, admin_id=1, session_maker=None)
+    await start_copy_poll(message, state, bot=fake_bot, session_maker=None)
 
-    message.answer.assert_awaited_once_with("Эта команда доступна только администратору.")
+    message.answer.assert_awaited_once_with("Эта команда доступна только администраторам этого чата.")
     assert await state.get_state() is None
 
 
@@ -51,7 +64,7 @@ async def test_start_copy_poll_rejects_private_chat():
     message = FakeMessage("/copypoll", user_id=1, chat_type="private")
     state = _state()
 
-    await start_copy_poll(message, state, admin_id=1, session_maker=None)
+    await start_copy_poll(message, state, bot=AsyncMock(), session_maker=None)
 
     message.answer.assert_awaited_once_with(
         "Эта команда работает только в группе, в теме которую нужно скопировать опрос."
@@ -63,7 +76,7 @@ async def test_start_copy_poll_reports_no_active_polls(session_maker):
     message = FakeMessage("/copypoll", user_id=1, chat_type="supergroup", chat_id=-500)
     state = _state()
 
-    await start_copy_poll(message, state, admin_id=1, session_maker=session_maker)
+    await start_copy_poll(message, state, bot=_admin_bot(), session_maker=session_maker)
 
     message.answer.assert_awaited_once_with("Активных опросов нет.")
     assert await state.get_state() is None
@@ -80,7 +93,7 @@ async def test_start_copy_poll_lists_active_polls_in_group(session_maker):
     )
     state = _state()
 
-    await start_copy_poll(message, state, admin_id=1, session_maker=session_maker)
+    await start_copy_poll(message, state, bot=_admin_bot(), session_maker=session_maker)
 
     assert await state.get_state() == CopyPollStates.waiting_poll_selection.state
     data = await state.get_data()
@@ -88,6 +101,32 @@ async def test_start_copy_poll_lists_active_polls_in_group(session_maker):
     assert data["target_message_thread_id"] == 42
     listed_text = message.answer.await_args.args[0]
     assert "Игра в апреле" in listed_text
+
+
+async def test_start_copy_poll_only_lists_active_polls_from_administered_chats(session_maker):
+    async with session_maker() as session:
+        await repo.create_poll(
+            session, chat_id=100, title="Моя группа", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+        await repo.create_poll(
+            session, chat_id=200, title="Чужая группа", options=[("25.07", dt.date(2026, 7, 25))]
+        )
+
+    message = FakeMessage("/copypoll", user_id=1, chat_type="supergroup", chat_id=-500)
+    state = _state()
+    fake_bot = AsyncMock()
+
+    async def _get_chat_member(chat_id, user_id):
+        statuses = {-500: "administrator", 100: "administrator", 200: "member"}
+        return FakeChatMember(status=statuses[chat_id])
+
+    fake_bot.get_chat_member.side_effect = _get_chat_member
+
+    await start_copy_poll(message, state, bot=fake_bot, session_maker=session_maker)
+
+    listed_text = message.answer.await_args.args[0]
+    assert "Моя группа" in listed_text
+    assert "Чужая группа" not in listed_text
 
 
 async def test_select_poll_to_copy_rejects_invalid_number(session_maker):
