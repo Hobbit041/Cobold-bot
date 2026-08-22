@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import datetime as dt
+from zoneinfo import ZoneInfo
+
 from aiogram import Bot, Router
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -9,17 +12,7 @@ from bot import formatting, repo
 router = Router(name="checkme")
 
 
-@router.message(Command("checkme"))
-async def handle_checkme(message: Message, bot: Bot, session_maker) -> None:
-    user = message.from_user
-    if user is None:
-        return
-
-    async with session_maker() as session:
-        rows = await repo.get_votes_by_user(session, user.id)
-
-    mention = formatting.voter_mention(user.username, user.first_name)
-
+async def _build_lines(bot: Bot, rows: list[tuple[repo.Poll, repo.Option]]) -> list[str]:
     chat_cache: dict[int, object | None] = {}
     lines: list[str] = []
     for poll, option in rows:
@@ -41,10 +34,47 @@ async def handle_checkme(message: Message, bot: Bot, session_maker) -> None:
             continue
 
         lines.append(formatting.record_line(len(lines) + 1, option.text, option.date, chat.title, link))
+    return lines
 
+
+async def _answer_with_lines(message: Message, lines: list[str], header: str, empty_text: str) -> None:
     if not lines:
-        await message.answer(formatting.checkme_empty_text(mention), parse_mode="HTML")
+        await message.answer(empty_text, parse_mode="HTML")
         return
 
-    text = formatting.checkme_header(mention) + "\n" + "\n".join(lines)
+    text = header + "\n" + "\n".join(lines)
     await message.answer(text, parse_mode="HTML")
+
+
+@router.message(Command("checkme"))
+async def handle_checkme(message: Message, bot: Bot, session_maker, timezone: ZoneInfo) -> None:
+    user = message.from_user
+    if user is None:
+        return
+
+    today = dt.datetime.now(timezone).date()
+    async with session_maker() as session:
+        rows = await repo.get_votes_by_user(session, user.id, on_or_after=today)
+
+    mention = formatting.voter_mention(user.username, user.first_name)
+    lines = await _build_lines(bot, rows)
+    await _answer_with_lines(
+        message, lines, formatting.checkme_header(mention), formatting.checkme_empty_text(mention)
+    )
+
+
+@router.message(Command("mygames"))
+async def handle_mygames(message: Message, bot: Bot, session_maker, timezone: ZoneInfo) -> None:
+    user = message.from_user
+    if user is None:
+        return
+
+    today = dt.datetime.now(timezone).date()
+    async with session_maker() as session:
+        rows = await repo.get_votes_by_user(session, user.id, before=today)
+
+    mention = formatting.voter_mention(user.username, user.first_name)
+    lines = await _build_lines(bot, rows)
+    await _answer_with_lines(
+        message, lines, formatting.mygames_header(mention), formatting.mygames_empty_text(mention)
+    )
