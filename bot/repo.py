@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models import Option, Poll, Reminder, ThresholdState, Vote
@@ -56,6 +56,23 @@ async def get_poll_options(session: AsyncSession, poll_id: int) -> list[Option]:
 
 async def get_poll(session: AsyncSession, poll_id: int) -> Poll | None:
     return await session.get(Poll, poll_id)
+
+
+async def get_chat_poll_stats(session: AsyncSession) -> list[tuple[int, dt.datetime]]:
+    """Distinct chat_ids that have at least one poll, each with its most
+    recent poll's created_at, newest first.
+
+    Used by /stats. Note: there's no separate table tracking which chats the
+    bot has been added to -- a chat whose every poll has been hard-deleted
+    via /deletepoll will no longer appear here, even if the bot is still a
+    member of it.
+    """
+    result = await session.execute(
+        select(Poll.chat_id, func.max(Poll.created_at))
+        .group_by(Poll.chat_id)
+        .order_by(func.max(Poll.created_at).desc())
+    )
+    return list(result.all())
 
 
 async def mark_poll_orphaned(session: AsyncSession, poll_id: int) -> None:

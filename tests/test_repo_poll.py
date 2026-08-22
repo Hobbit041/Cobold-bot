@@ -103,3 +103,29 @@ async def test_delete_poll_removes_poll_and_all_related_data(session_maker):
 async def test_delete_poll_on_nonexistent_poll_id_is_a_noop(session_maker):
     async with session_maker() as session:
         await repo.delete_poll(session, 999999)
+
+
+async def test_get_chat_poll_stats_returns_empty_list_when_no_polls(session_maker):
+    async with session_maker() as session:
+        stats = await repo.get_chat_poll_stats(session)
+
+    assert stats == []
+
+
+async def test_get_chat_poll_stats_groups_by_chat_and_returns_latest_created_at(session_maker):
+    async with session_maker() as session:
+        poll_a1 = await repo.create_poll(session, chat_id=100, title="A1", options=[("x", None)])
+        poll_a2 = await repo.create_poll(session, chat_id=100, title="A2", options=[("x", None)])
+        poll_b = await repo.create_poll(session, chat_id=200, title="B", options=[("x", None)])
+
+        poll_a1.created_at = dt.datetime(2026, 8, 10, 10, 0, 0)
+        poll_a2.created_at = dt.datetime(2026, 8, 20, 10, 0, 0)
+        poll_b.created_at = dt.datetime(2026, 8, 15, 10, 0, 0)
+        await session.commit()
+
+        stats = await repo.get_chat_poll_stats(session)
+
+    assert stats == [
+        (100, dt.datetime(2026, 8, 20, 10, 0, 0)),
+        (200, dt.datetime(2026, 8, 15, 10, 0, 0)),
+    ]
