@@ -45,7 +45,7 @@ except ImportError:
 from bot import jobs
 from bot.config import load_config
 from bot.db import create_engine_and_sessionmaker, init_db
-from bot.handlers import admin_copy, admin_create, admin_delete, admin_edit, checkme, dialog_control, voting
+from bot.handlers import admin_copy, admin_create, admin_delete, admin_edit, checkme, dialog_control, stats, voting
 from bot.scheduler import create_scheduler, schedule_daily_reminder_job
 
 
@@ -84,6 +84,7 @@ async def main() -> None:
     dp.include_router(admin_delete.router)
     dp.include_router(voting.router)
     dp.include_router(checkme.router)
+    dp.include_router(stats.router)
 
     scheduler = create_scheduler(config.jobs_db_path, config.timezone)
     admin_mention = f"@{config.admin_username}"
