@@ -17,6 +17,11 @@ class FakeChat:
         self.type = type
 
 
+class FakeChatMember:
+    def __init__(self, status):
+        self.status = status
+
+
 class FakeMessage:
     def __init__(
         self, text, user_id=1, chat_type="private", chat_id=1, message_id=10, message_thread_id=None
@@ -37,21 +42,34 @@ def _state():
     return FSMContext(storage=storage, key=key)
 
 
-async def test_start_delete_poll_rejects_non_admin():
-    message = FakeMessage("/deletepoll", user_id=2)
-    state = _state()
-
-    await start_delete_poll(message, state, admin_id=1, session_maker=None)
-
-    message.answer.assert_awaited_once_with("Эта команда доступна только администратору.")
-    assert await state.get_state() is None
+def _admin_bot():
+    bot = AsyncMock()
+    bot.get_chat_member.return_value = FakeChatMember(status="administrator")
+    return bot
 
 
 async def test_start_delete_poll_reports_no_polls(session_maker):
     message = FakeMessage("/deletepoll", user_id=1)
     state = _state()
 
-    await start_delete_poll(message, state, admin_id=1, session_maker=session_maker)
+    await start_delete_poll(message, state, bot=AsyncMock(), session_maker=session_maker)
+
+    message.answer.assert_awaited_once_with("Опросов нет.")
+    assert await state.get_state() is None
+
+
+async def test_start_delete_poll_hides_polls_from_chats_user_does_not_administer(session_maker):
+    async with session_maker() as session:
+        await repo.create_poll(
+            session, chat_id=100, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+
+    message = FakeMessage("/deletepoll", user_id=2)
+    state = _state()
+    fake_bot = AsyncMock()
+    fake_bot.get_chat_member.return_value = FakeChatMember(status="member")
+
+    await start_delete_poll(message, state, bot=fake_bot, session_maker=session_maker)
 
     message.answer.assert_awaited_once_with("Опросов нет.")
     assert await state.get_state() is None
@@ -70,7 +88,7 @@ async def test_start_delete_poll_lists_active_and_orphaned_polls(session_maker):
     message = FakeMessage("/deletepoll", user_id=1)
     state = _state()
 
-    await start_delete_poll(message, state, admin_id=1, session_maker=session_maker)
+    await start_delete_poll(message, state, bot=_admin_bot(), session_maker=session_maker)
 
     listed_text = message.answer.await_args.args[0]
     assert "Активный" in listed_text
@@ -78,6 +96,34 @@ async def test_start_delete_poll_lists_active_and_orphaned_polls(session_maker):
     assert "[опрос удалён, есть только в БД]" in listed_text
     data = await state.get_data()
     assert len(data["poll_ids"]) == 2
+
+
+async def test_start_delete_poll_only_lists_polls_from_administered_chats(session_maker):
+    async with session_maker() as session:
+        await repo.create_poll(
+            session, chat_id=100, title="Моя группа", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+        await repo.create_poll(
+            session, chat_id=200, title="Чужая группа", options=[("25.07", dt.date(2026, 7, 25))]
+        )
+
+    message = FakeMessage("/deletepoll", user_id=1)
+    state = _state()
+    fake_bot = AsyncMock()
+
+    async def _get_chat_member(chat_id, user_id):
+        statuses = {100: "administrator", 200: "member"}
+        return FakeChatMember(status=statuses[chat_id])
+
+    fake_bot.get_chat_member.side_effect = _get_chat_member
+
+    await start_delete_poll(message, state, bot=fake_bot, session_maker=session_maker)
+
+    listed_text = message.answer.await_args.args[0]
+    assert "Моя группа" in listed_text
+    assert "Чужая группа" not in listed_text
+    data = await state.get_data()
+    assert len(data["poll_ids"]) == 1
 
 
 async def test_start_delete_poll_works_in_group_chat(session_maker):
@@ -89,7 +135,7 @@ async def test_start_delete_poll_works_in_group_chat(session_maker):
     message = FakeMessage("/deletepoll", user_id=1, chat_type="supergroup", chat_id=-500)
     state = _state()
 
-    await start_delete_poll(message, state, admin_id=1, session_maker=session_maker)
+    await start_delete_poll(message, state, bot=_admin_bot(), session_maker=session_maker)
 
     assert await state.get_state() == DeletePollStates.waiting_poll_selection.state
     message.delete.assert_awaited_once()
@@ -169,8 +215,6 @@ async def test_select_poll_to_delete_in_group_cleans_prompt_and_schedules_confir
 
     state = _state()
     await state.set_state(DeletePollStates.waiting_poll_selection)
-    # last_bot_message_id is the "Какой опрос удалить?" prompt that used to be
-    # left hanging because the handler cleared state before cleaning up.
     await state.update_data(poll_ids=[poll_id], last_bot_message_id=777)
 
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
@@ -183,8 +227,6 @@ async def test_select_poll_to_delete_in_group_cleans_prompt_and_schedules_confir
         message, state, bot=fake_bot, session_maker=session_maker, scheduler=scheduler
     )
 
-    # The lingering prompt is deleted, and the "Опрос удалён." confirmation is
-    # scheduled to auto-delete.
     message.bot.delete_message.assert_awaited_once_with(chat_id=-500, message_id=777)
     message.answer.assert_awaited_once_with("Опрос удалён.")
     assert await state.get_state() is None

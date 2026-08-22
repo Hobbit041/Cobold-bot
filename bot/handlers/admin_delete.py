@@ -1,9 +1,11 @@
-"""Admin-only /deletepoll: permanently delete a poll's database record and its
-live Telegram message.
+"""/deletepoll: permanently delete a poll's database record and its live
+Telegram message.
 
 Works from any chat, including a DM with the bot (like /editpoll) -- the
 message to delete is identified by the poll's own stored chat_id/message_id,
-not by whatever chat the admin happens to run /deletepoll from.
+not by whatever chat the caller happens to run /deletepoll from. Available to
+any user; the list of polls offered is filtered down to only those in chats
+the requester administers/created (bot.authz.filter_by_chat_admin).
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from aiogram.types import Message
 from sqlalchemy import select
 
 from bot import repo
+from bot.authz import filter_by_chat_admin
 from bot.handlers.dialog_cleanup import cleanup_and_answer, cleanup_and_finish
 from bot.models import Poll
 
@@ -29,19 +32,11 @@ class DeletePollStates(StatesGroup):
     waiting_poll_selection = State()
 
 
-def _is_admin(message: Message, admin_id: int) -> bool:
-    return message.from_user is not None and message.from_user.id == admin_id
-
-
 @router.message(Command("deletepoll"))
 async def start_delete_poll(
-    message: Message, state: FSMContext, admin_id: int, session_maker, scheduler=None
+    message: Message, state: FSMContext, bot: Bot, session_maker, scheduler=None
 ) -> None:
-    if not _is_admin(message, admin_id):
-        await cleanup_and_finish(
-            message, state, "Эта команда доступна только администратору.", scheduler=scheduler
-        )
-        return
+    user_id = message.from_user.id if message.from_user is not None else None
 
     async with session_maker() as session:
         # Unlike /editpoll and /copypoll, deliberately not filtered to status
@@ -49,6 +44,8 @@ async def start_delete_poll(
         # or it would be permanently unreachable/undeletable from any command.
         result = await session.execute(select(Poll))
         polls = list(result.scalars().all())
+
+    polls = await filter_by_chat_admin(bot, polls, user_id, lambda p: p.chat_id)
 
     if not polls:
         await cleanup_and_finish(message, state, "Опросов нет.", scheduler=scheduler)
