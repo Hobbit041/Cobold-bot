@@ -49,6 +49,60 @@ def _state():
     return FSMContext(storage=storage, key=key)
 
 
+class FakeChatMember:
+    def __init__(self, status):
+        self.status = status
+
+
+def _admin_bot():
+    bot = AsyncMock()
+    bot.get_chat_member.return_value = FakeChatMember(status="administrator")
+    return bot
+
+
+async def test_start_edit_poll_hides_polls_from_chats_user_does_not_administer(session_maker):
+    async with session_maker() as session:
+        await repo.create_poll(
+            session, chat_id=100, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+
+    message = FakeMessage("/editpoll", user_id=2)
+    state = _state()
+    fake_bot = AsyncMock()
+    fake_bot.get_chat_member.return_value = FakeChatMember(status="member")
+
+    await start_edit_poll(message, state, bot=fake_bot, session_maker=session_maker)
+
+    message.answer.assert_awaited_once_with("Активных опросов нет.")
+    assert await state.get_state() is None
+
+
+async def test_start_edit_poll_only_lists_polls_from_administered_chats(session_maker):
+    async with session_maker() as session:
+        await repo.create_poll(
+            session, chat_id=100, title="Моя группа", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+        await repo.create_poll(
+            session, chat_id=200, title="Чужая группа", options=[("25.07", dt.date(2026, 7, 25))]
+        )
+
+    message = FakeMessage("/editpoll", user_id=1)
+    state = _state()
+    fake_bot = AsyncMock()
+
+    async def _get_chat_member(chat_id, user_id):
+        statuses = {100: "administrator", 200: "member"}
+        return FakeChatMember(status=statuses[chat_id])
+
+    fake_bot.get_chat_member.side_effect = _get_chat_member
+
+    await start_edit_poll(message, state, bot=fake_bot, session_maker=session_maker)
+
+    listed_text = message.answer.await_args.args[0]
+    assert "Моя группа" in listed_text
+    assert "Чужая группа" not in listed_text
+
+
 async def test_edit_text_notifies_existing_voters(tmp_path, session_maker):
     async with session_maker() as session:
         poll = await repo.create_poll(session, chat_id=100, title="Игра", options=[("24.07", dt.date(2026, 7, 24))])
@@ -60,7 +114,7 @@ async def test_edit_text_notifies_existing_voters(tmp_path, session_maker):
     fake_bot = AsyncMock()
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
 
-    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await start_edit_poll(FakeMessage("/editpoll"), state, bot=_admin_bot(), session_maker=session_maker)
     await select_poll(FakeMessage("1"), state, session_maker=session_maker)
     await select_option(FakeMessage("1"), state)
     await select_action(
@@ -98,7 +152,7 @@ async def test_delete_option_notifies_and_removes_it(tmp_path, session_maker):
     fake_bot = AsyncMock()
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
 
-    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await start_edit_poll(FakeMessage("/editpoll"), state, bot=_admin_bot(), session_maker=session_maker)
     await select_poll(FakeMessage("1"), state, session_maker=session_maker)
     await select_option(FakeMessage("1"), state)
     await select_action(
@@ -128,7 +182,7 @@ async def test_edit_date_notifies_existing_voters(tmp_path, session_maker):
     fake_bot = AsyncMock()
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
 
-    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await start_edit_poll(FakeMessage("/editpoll"), state, bot=_admin_bot(), session_maker=session_maker)
     await select_poll(FakeMessage("1"), state, session_maker=session_maker)
     await select_option(FakeMessage("1"), state)
     await select_action(
@@ -160,7 +214,7 @@ async def test_edit_text_without_voters_sends_no_notification(tmp_path, session_
     fake_bot = AsyncMock()
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
 
-    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await start_edit_poll(FakeMessage("/editpoll"), state, bot=_admin_bot(), session_maker=session_maker)
     await select_poll(FakeMessage("1"), state, session_maker=session_maker)
     await select_option(FakeMessage("1"), state)
     await select_action(
@@ -188,7 +242,7 @@ async def test_edit_text_survives_refresh_failure_and_still_replies(tmp_path, se
     fake_bot.edit_message_text.side_effect = Exception("message to edit not found")
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
 
-    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await start_edit_poll(FakeMessage("/editpoll"), state, bot=_admin_bot(), session_maker=session_maker)
     await select_poll(FakeMessage("1"), state, session_maker=session_maker)
     await select_option(FakeMessage("1"), state)
     await select_action(
@@ -231,7 +285,7 @@ async def test_apply_new_text_shows_voter_names_for_all_options(tmp_path, sessio
     fake_bot = AsyncMock()
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
 
-    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await start_edit_poll(FakeMessage("/editpoll"), state, bot=_admin_bot(), session_maker=session_maker)
     await select_poll(FakeMessage("1"), state, session_maker=session_maker)
     await select_option(FakeMessage("1"), state)
     await select_action(
@@ -255,8 +309,9 @@ async def test_editpoll_started_in_group_deletes_admin_messages_and_previous_pro
     fake_bot = AsyncMock()
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
 
+    fake_bot.get_chat_member.return_value = FakeChatMember(status="administrator")
     start_message = FakeMessage("/editpoll", chat_type="group", chat_id=-500, message_id=1)
-    await start_edit_poll(start_message, state, admin_id=1, session_maker=session_maker)
+    await start_edit_poll(start_message, state, bot=fake_bot, session_maker=session_maker)
     start_message.delete.assert_awaited_once()
 
     poll_message = FakeMessage("1", chat_type="group", chat_id=-500, message_id=2)
@@ -283,7 +338,7 @@ async def test_apply_new_text_notification_uses_poll_message_thread_id(tmp_path,
     fake_bot = AsyncMock()
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
 
-    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await start_edit_poll(FakeMessage("/editpoll"), state, bot=_admin_bot(), session_maker=session_maker)
     await select_poll(FakeMessage("1"), state, session_maker=session_maker)
     await select_option(FakeMessage("1"), state)
     await select_action(
@@ -335,8 +390,9 @@ async def test_editpoll_in_group_arms_idle_timeout_and_clears_it_on_finish(tmp_p
     fake_bot = AsyncMock()
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
 
+    fake_bot.get_chat_member.return_value = FakeChatMember(status="administrator")
     start_message = FakeMessage("/editpoll", user_id=3, chat_type="group", chat_id=-500, message_id=1)
-    await start_edit_poll(start_message, state, admin_id=3, session_maker=session_maker, scheduler=scheduler)
+    await start_edit_poll(start_message, state, bot=fake_bot, session_maker=session_maker, scheduler=scheduler)
     assert scheduler.get_job(dialog_timeout_job_id(-500, 3)) is not None
 
     poll_message = FakeMessage("1", user_id=3, chat_type="group", chat_id=-500, message_id=2)
@@ -367,7 +423,7 @@ async def test_addoption_appends_new_option_and_refreshes_poll_message(tmp_path,
     fake_bot = AsyncMock()
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
 
-    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await start_edit_poll(FakeMessage("/editpoll"), state, bot=_admin_bot(), session_maker=session_maker)
     await select_poll(FakeMessage("1"), state, session_maker=session_maker)
     await start_add_option(FakeMessage("/addoption"), state, scheduler=scheduler)
     assert await state.get_state() == EditPollStates.waiting_new_option.state
@@ -395,7 +451,7 @@ async def test_addoption_rejects_invalid_format_and_stays_in_state(tmp_path, ses
     state = _state()
     fake_bot = AsyncMock()
 
-    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await start_edit_poll(FakeMessage("/editpoll"), state, bot=_admin_bot(), session_maker=session_maker)
     await select_poll(FakeMessage("1"), state, session_maker=session_maker)
     await start_add_option(FakeMessage("/addoption"), state)
 
@@ -419,7 +475,7 @@ async def test_addoption_accepts_text_with_no_date(tmp_path, session_maker):
     state = _state()
     fake_bot = AsyncMock()
 
-    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await start_edit_poll(FakeMessage("/editpoll"), state, bot=_admin_bot(), session_maker=session_maker)
     await select_poll(FakeMessage("1"), state, session_maker=session_maker)
     await start_add_option(FakeMessage("/addoption"), state)
     await receive_new_option(FakeMessage("Во что поиграть"), state, bot=fake_bot, session_maker=session_maker)
@@ -443,7 +499,7 @@ async def test_apply_new_date_on_option_with_no_prior_date(tmp_path, session_mak
     fake_bot = AsyncMock()
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
 
-    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await start_edit_poll(FakeMessage("/editpoll"), state, bot=_admin_bot(), session_maker=session_maker)
     await select_poll(FakeMessage("1"), state, session_maker=session_maker)
     await select_option(FakeMessage("1"), state)
     await select_action(
@@ -469,7 +525,7 @@ async def test_edit_text_on_option_without_date_sends_no_notification(tmp_path, 
     fake_bot = AsyncMock()
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
 
-    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await start_edit_poll(FakeMessage("/editpoll"), state, bot=_admin_bot(), session_maker=session_maker)
     await select_poll(FakeMessage("1"), state, session_maker=session_maker)
     await select_option(FakeMessage("1"), state)
     await select_action(
@@ -498,7 +554,7 @@ async def test_delete_option_without_date_sends_no_notification(tmp_path, sessio
     fake_bot = AsyncMock()
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
 
-    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await start_edit_poll(FakeMessage("/editpoll"), state, bot=_admin_bot(), session_maker=session_maker)
     await select_poll(FakeMessage("1"), state, session_maker=session_maker)
     await select_option(FakeMessage("1"), state)
     await select_action(
@@ -518,7 +574,7 @@ async def test_select_poll_rejects_zero_instead_of_wrapping_to_last_poll(session
         await repo.create_poll(session, chat_id=100, title="Игра 2", options=[("25.07", dt.date(2026, 7, 25))])
 
     state = _state()
-    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await start_edit_poll(FakeMessage("/editpoll"), state, bot=_admin_bot(), session_maker=session_maker)
 
     message = FakeMessage("0")
     await select_poll(message, state, session_maker=session_maker)
@@ -537,7 +593,7 @@ async def test_select_option_rejects_zero_instead_of_wrapping_to_last_option(ses
         )
 
     state = _state()
-    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await start_edit_poll(FakeMessage("/editpoll"), state, bot=_admin_bot(), session_maker=session_maker)
     await select_poll(FakeMessage("1"), state, session_maker=session_maker)
 
     message = FakeMessage("0")
@@ -560,7 +616,7 @@ async def test_apply_new_text_marks_poll_orphaned_when_message_not_found(session
         message="Bad Request: message to edit not found",
     )
 
-    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await start_edit_poll(FakeMessage("/editpoll"), state, bot=_admin_bot(), session_maker=session_maker)
     await select_poll(FakeMessage("1"), state, session_maker=session_maker)
     await select_option(FakeMessage("1"), state)
     await select_action(FakeMessage("text"), state, bot=fake_bot, session_maker=session_maker)
@@ -656,7 +712,7 @@ async def test_revoll_reorders_options_and_refreshes_message(tmp_path, session_m
     fake_bot = AsyncMock()
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
 
-    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await start_edit_poll(FakeMessage("/editpoll"), state, bot=_admin_bot(), session_maker=session_maker)
     await select_poll(FakeMessage("1"), state, session_maker=session_maker)
     await start_reorder(FakeMessage("/revoll"), state, session_maker=session_maker, scheduler=scheduler)
     assert await state.get_state() == EditPollStates.waiting_new_order.state
@@ -684,7 +740,7 @@ async def test_revoll_rejects_invalid_order_and_stays_in_state(tmp_path, session
     state = _state()
     fake_bot = AsyncMock()
 
-    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await start_edit_poll(FakeMessage("/editpoll"), state, bot=_admin_bot(), session_maker=session_maker)
     await select_poll(FakeMessage("1"), state, session_maker=session_maker)
     await start_reorder(FakeMessage("/revoll"), state, session_maker=session_maker)
 
@@ -713,7 +769,7 @@ async def test_revoll_rejects_unicode_digit_like_order_and_stays_in_state(tmp_pa
     state = _state()
     fake_bot = AsyncMock()
 
-    await start_edit_poll(FakeMessage("/editpoll"), state, admin_id=1, session_maker=session_maker)
+    await start_edit_poll(FakeMessage("/editpoll"), state, bot=_admin_bot(), session_maker=session_maker)
     await select_poll(FakeMessage("1"), state, session_maker=session_maker)
     await start_reorder(FakeMessage("/revoll"), state, session_maker=session_maker)
 

@@ -1,4 +1,9 @@
-"""Admin-only conversation flow for editing an existing poll via /editpoll.
+"""Conversation flow for editing an existing poll via /editpoll.
+
+Available to any user; the list of polls offered is filtered down to only
+those in chats the requester administers/created
+(bot.authz.filter_by_chat_admin), so /editpoll never reveals another chat's
+poll titles to someone who isn't that chat's admin.
 
 Thin aiogram glue: state transitions live here, but parsing/formatting/
 persistence logic is delegated to bot.date_utils / bot.formatting /
@@ -19,6 +24,7 @@ from aiogram.types import Message
 from sqlalchemy import select
 
 from bot import date_utils, formatting, keyboards, repo
+from bot.authz import filter_by_chat_admin
 from bot.handlers.dialog_cleanup import cleanup_and_answer, cleanup_and_finish
 from bot.models import Poll
 from bot.scheduler import cancel_threshold_check
@@ -44,23 +50,17 @@ class EditPollStates(StatesGroup):
     waiting_new_order = State()
 
 
-def _is_admin(message: Message, admin_id: int) -> bool:
-    return message.from_user is not None and message.from_user.id == admin_id
-
-
 @router.message(Command("editpoll"))
 async def start_edit_poll(
-    message: Message, state: FSMContext, admin_id: int, session_maker, scheduler=None
+    message: Message, state: FSMContext, bot: Bot, session_maker, scheduler=None
 ) -> None:
-    if not _is_admin(message, admin_id):
-        await cleanup_and_finish(
-            message, state, "Эта команда доступна только администратору.", scheduler=scheduler
-        )
-        return
+    user_id = message.from_user.id if message.from_user is not None else None
 
     async with session_maker() as session:
         result = await session.execute(select(Poll).where(Poll.status == "active"))
         polls = list(result.scalars().all())
+
+    polls = await filter_by_chat_admin(bot, polls, user_id, lambda p: p.chat_id)
 
     if not polls:
         await cleanup_and_finish(message, state, "Активных опросов нет.", scheduler=scheduler)
