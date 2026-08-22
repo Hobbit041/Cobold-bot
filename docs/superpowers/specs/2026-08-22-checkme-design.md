@@ -120,9 +120,11 @@ async def handle_checkme(message: Message, bot: Bot, session_maker) -> None:
      если `None` — пропустить;
    - иначе — `formatting.checkme_line(len(lines) + 1, option.text, option.date, chat.title, link)`
      добавляется в список строк.
-4. Если строк нет — `await message.answer(formatting.checkme_empty_text(mention))`
-   (без `parse_mode`, экранирование там не нужно чувствительно, но
-   `checkme_empty_text` всё равно экранирует для единообразия).
+4. Если строк нет — `await message.answer(formatting.checkme_empty_text(mention), parse_mode="HTML")`.
+   `parse_mode="HTML"` обязателен и в этой ветке: `checkme_empty_text`
+   экранирует `mention` через `html.escape`, и без `parse_mode` эти
+   escape-последовательности (например, `&amp;` для имени вида `A&B`)
+   показались бы пользователю буквально, а не как исходный символ.
 5. Иначе — `text = formatting.checkme_header(mention) + "\n" + "\n".join(lines)`,
    `await message.answer(text, parse_mode="HTML")`.
 6. `mention = formatting.voter_mention(user.username, user.first_name)`
