@@ -2,9 +2,9 @@ import datetime as dt
 from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
-from bot import repo
+from bot import keyboards, repo
 from bot.date_utils import format_date_ru
-from bot.handlers.checkme import handle_checkme, handle_mygames
+from bot.handlers.checkme import handle_checkme, handle_delete_button, handle_mygames
 
 
 class FakeUser:
@@ -35,6 +35,20 @@ class FakeResolvedChat:
 
 
 TZ = ZoneInfo("Europe/Moscow")
+DELETE_KEYBOARD = keyboards.build_delete_keyboard(1)
+
+
+class FakeChatMember:
+    def __init__(self, status):
+        self.status = status
+
+
+class FakeCallback:
+    def __init__(self, data, user, message):
+        self.data = data
+        self.from_user = user
+        self.message = message
+        self.answer = AsyncMock()
 
 
 async def test_handle_checkme_lists_dated_votes_across_chats_ordered_by_date(session_maker):
@@ -69,6 +83,7 @@ async def test_handle_checkme_lists_dated_votes_across_chats_ordered_by_date(ses
         f'1. <a href="https://t.me/c/200/22">{format_date_ru(date_sooner)}, Раньше</a> (Компания Б, 1 игрок)\n'
         f'2. <a href="https://t.me/companya/11">{format_date_ru(date_later)}, Позже</a> (Компания А, 1 игрок)',
         parse_mode="HTML",
+        reply_markup=DELETE_KEYBOARD,
     )
 
 
@@ -105,6 +120,7 @@ async def test_handle_checkme_skips_row_when_get_chat_raises(session_maker):
         "@alice, вы записаны:\n"
         f'1. <a href="https://t.me/companya/11">{format_date_ru(date_ok)}, Ок</a> (Компания А, 1 игрок)',
         parse_mode="HTML",
+        reply_markup=DELETE_KEYBOARD,
     )
 
 
@@ -128,7 +144,7 @@ async def test_handle_checkme_skips_row_when_no_link_possible(session_maker):
     await handle_checkme(message, bot=fake_bot, session_maker=session_maker, timezone=TZ)
 
     message.answer.assert_awaited_once_with(
-        "@alice, у вас нет записей на игры.", parse_mode="HTML"
+        "@alice, у вас нет записей на игры.", parse_mode="HTML", reply_markup=DELETE_KEYBOARD
     )
 
 
@@ -139,7 +155,7 @@ async def test_handle_checkme_with_no_votes_sends_empty_text(session_maker):
     await handle_checkme(message, bot=fake_bot, session_maker=session_maker, timezone=TZ)
 
     message.answer.assert_awaited_once_with(
-        "Alice, у вас нет записей на игры.", parse_mode="HTML"
+        "Alice, у вас нет записей на игры.", parse_mode="HTML", reply_markup=DELETE_KEYBOARD
     )
     fake_bot.get_chat.assert_not_awaited()
 
@@ -162,6 +178,7 @@ async def test_handle_checkme_includes_todays_game(session_maker):
         "@alice, вы записаны:\n"
         f'1. <a href="https://t.me/company/11">{format_date_ru(today)}, Сегодня</a> (Компания, 1 игрок)',
         parse_mode="HTML",
+        reply_markup=DELETE_KEYBOARD,
     )
 
 
@@ -182,7 +199,7 @@ async def test_handle_checkme_excludes_past_games(session_maker):
     await handle_checkme(message, bot=fake_bot, session_maker=session_maker, timezone=TZ)
 
     message.answer.assert_awaited_once_with(
-        "@alice, у вас нет записей на игры.", parse_mode="HTML"
+        "@alice, у вас нет записей на игры.", parse_mode="HTML", reply_markup=DELETE_KEYBOARD
     )
     fake_bot.get_chat.assert_not_awaited()
 
@@ -219,6 +236,7 @@ async def test_handle_mygames_lists_past_votes_across_chats_ordered_by_date(sess
         f'1. <a href="https://t.me/c/200/22">{format_date_ru(date_older)}, Раньше</a> (Компания Б, 1 игрок)\n'
         f'2. <a href="https://t.me/companya/11">{format_date_ru(date_newer)}, Позже</a> (Компания А, 1 игрок)',
         parse_mode="HTML",
+        reply_markup=DELETE_KEYBOARD,
     )
 
 
@@ -255,6 +273,7 @@ async def test_handle_mygames_skips_row_when_get_chat_raises(session_maker):
         "@alice, вы играли:\n"
         f'1. <a href="https://t.me/companya/11">{format_date_ru(date_ok)}, Ок</a> (Компания А, 1 игрок)',
         parse_mode="HTML",
+        reply_markup=DELETE_KEYBOARD,
     )
 
 
@@ -278,7 +297,7 @@ async def test_handle_mygames_skips_row_when_no_link_possible(session_maker):
     await handle_mygames(message, bot=fake_bot, session_maker=session_maker, timezone=TZ)
 
     message.answer.assert_awaited_once_with(
-        "@alice, у вас нет прошедших игр.", parse_mode="HTML"
+        "@alice, у вас нет прошедших игр.", parse_mode="HTML", reply_markup=DELETE_KEYBOARD
     )
 
 
@@ -289,7 +308,7 @@ async def test_handle_mygames_with_no_votes_sends_empty_text(session_maker):
     await handle_mygames(message, bot=fake_bot, session_maker=session_maker, timezone=TZ)
 
     message.answer.assert_awaited_once_with(
-        "Alice, у вас нет прошедших игр.", parse_mode="HTML"
+        "Alice, у вас нет прошедших игр.", parse_mode="HTML", reply_markup=DELETE_KEYBOARD
     )
     fake_bot.get_chat.assert_not_awaited()
 
@@ -317,6 +336,76 @@ async def test_handle_mygames_excludes_todays_and_future_games(session_maker):
     await handle_mygames(message, bot=fake_bot, session_maker=session_maker, timezone=TZ)
 
     message.answer.assert_awaited_once_with(
-        "@alice, у вас нет прошедших игр.", parse_mode="HTML"
+        "@alice, у вас нет прошедших игр.", parse_mode="HTML", reply_markup=DELETE_KEYBOARD
     )
     fake_bot.get_chat.assert_not_awaited()
+
+
+async def test_handle_delete_button_requester_deletes(session_maker):
+    message = FakeMessage(FakeUser(id=1, username="alice", first_name="Alice"))
+    message.message_id = 99
+    message.delete = AsyncMock()
+    callback = FakeCallback("checkme_delete:1", FakeUser(id=1, username="alice", first_name="Alice"), message)
+    fake_bot = AsyncMock()
+
+    await handle_delete_button(callback, bot=fake_bot)
+
+    message.delete.assert_awaited_once()
+    callback.answer.assert_awaited_once()
+    fake_bot.get_chat_member.assert_not_awaited()
+
+
+async def test_handle_delete_button_chat_admin_deletes(session_maker):
+    message = FakeMessage(FakeUser(id=1, username="alice", first_name="Alice"))
+    message.message_id = 99
+    message.delete = AsyncMock()
+    callback = FakeCallback("checkme_delete:1", FakeUser(id=2, username="bob", first_name="Bob"), message)
+    fake_bot = AsyncMock()
+    fake_bot.get_chat_member.return_value = FakeChatMember(status="administrator")
+
+    await handle_delete_button(callback, bot=fake_bot)
+
+    message.delete.assert_awaited_once()
+    callback.answer.assert_awaited_once()
+
+
+async def test_handle_delete_button_chat_creator_deletes(session_maker):
+    message = FakeMessage(FakeUser(id=1, username="alice", first_name="Alice"))
+    message.message_id = 99
+    message.delete = AsyncMock()
+    callback = FakeCallback("checkme_delete:1", FakeUser(id=2, username="bob", first_name="Bob"), message)
+    fake_bot = AsyncMock()
+    fake_bot.get_chat_member.return_value = FakeChatMember(status="creator")
+
+    await handle_delete_button(callback, bot=fake_bot)
+
+    message.delete.assert_awaited_once()
+    callback.answer.assert_awaited_once()
+
+
+async def test_handle_delete_button_plain_member_is_silently_refused(session_maker):
+    message = FakeMessage(FakeUser(id=1, username="alice", first_name="Alice"))
+    message.message_id = 99
+    message.delete = AsyncMock()
+    callback = FakeCallback("checkme_delete:1", FakeUser(id=2, username="bob", first_name="Bob"), message)
+    fake_bot = AsyncMock()
+    fake_bot.get_chat_member.return_value = FakeChatMember(status="member")
+
+    await handle_delete_button(callback, bot=fake_bot)
+
+    message.delete.assert_not_awaited()
+    callback.answer.assert_awaited_once_with()
+
+
+async def test_handle_delete_button_get_chat_member_error_is_silently_refused(session_maker):
+    message = FakeMessage(FakeUser(id=1, username="alice", first_name="Alice"))
+    message.message_id = 99
+    message.delete = AsyncMock()
+    callback = FakeCallback("checkme_delete:1", FakeUser(id=2, username="bob", first_name="Bob"), message)
+    fake_bot = AsyncMock()
+    fake_bot.get_chat_member.side_effect = RuntimeError("not a group")
+
+    await handle_delete_button(callback, bot=fake_bot)
+
+    message.delete.assert_not_awaited()
+    callback.answer.assert_awaited_once_with()

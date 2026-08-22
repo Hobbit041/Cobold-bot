@@ -1,6 +1,6 @@
 import datetime as dt
 
-from bot.keyboards import build_poll_keyboard
+from bot.keyboards import build_delete_keyboard, build_poll_keyboard
 
 
 def test_build_poll_keyboard_creates_one_button_per_option():
@@ -23,3 +23,10 @@ def test_build_poll_keyboard_option_without_date():
     markup = build_poll_keyboard([(1, "Во что поиграть", None, 3)])
 
     assert markup.inline_keyboard[0][0].text == "Во что поиграть — 3"
+
+
+def test_build_delete_keyboard_encodes_requester_id():
+    markup = build_delete_keyboard(42)
+
+    assert markup.inline_keyboard[0][0].text == "Удалить"
+    assert markup.inline_keyboard[0][0].callback_data == "checkme_delete:42"

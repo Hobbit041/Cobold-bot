@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from zoneinfo import ZoneInfo
 
-from aiogram import Bot, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 
-from bot import formatting, repo
+from bot import formatting, keyboards, repo
+
+logger = logging.getLogger(__name__)
 
 router = Router(name="checkme")
 
@@ -43,13 +46,17 @@ async def _build_lines(
     return lines
 
 
-async def _answer_with_lines(message: Message, lines: list[str], header: str, empty_text: str) -> None:
+async def _answer_with_lines(
+    message: Message, lines: list[str], header: str, empty_text: str, requester_id: int
+) -> None:
+    keyboard = keyboards.build_delete_keyboard(requester_id)
+
     if not lines:
-        await message.answer(empty_text, parse_mode="HTML")
+        await message.answer(empty_text, parse_mode="HTML", reply_markup=keyboard)
         return
 
     text = header + "\n" + "\n".join(lines)
-    await message.answer(text, parse_mode="HTML")
+    await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
 
 
 @router.message(Command("checkme"))
@@ -66,7 +73,7 @@ async def handle_checkme(message: Message, bot: Bot, session_maker, timezone: Zo
     mention = formatting.voter_mention(user.username, user.first_name)
     lines = await _build_lines(bot, rows, vote_counts)
     await _answer_with_lines(
-        message, lines, formatting.checkme_header(mention), formatting.checkme_empty_text(mention)
+        message, lines, formatting.checkme_header(mention), formatting.checkme_empty_text(mention), user.id
     )
 
 
@@ -86,5 +93,34 @@ async def handle_mygames(message: Message, bot: Bot, session_maker, timezone: Zo
     mention = formatting.voter_mention(user.username, user.first_name)
     lines = await _build_lines(bot, rows, vote_counts)
     await _answer_with_lines(
-        message, lines, formatting.mygames_header(mention), formatting.mygames_empty_text(mention)
+        message, lines, formatting.mygames_header(mention), formatting.mygames_empty_text(mention), user.id
     )
+
+
+@router.callback_query(F.data.startswith("checkme_delete:"))
+async def handle_delete_button(callback: CallbackQuery, bot: Bot) -> None:
+    if callback.message is None:
+        await callback.answer()
+        return
+
+    requester_id = int(callback.data.split(":", 1)[1])
+    presser_id = callback.from_user.id
+
+    allowed = presser_id == requester_id
+    if not allowed:
+        try:
+            member = await bot.get_chat_member(callback.message.chat.id, presser_id)
+            allowed = member.status in ("administrator", "creator")
+        except Exception:
+            allowed = False
+
+    if not allowed:
+        await callback.answer()
+        return
+
+    try:
+        await callback.message.delete()
+    except Exception:
+        logger.exception("Failed to delete /checkme message %s", callback.message.message_id)
+
+    await callback.answer()

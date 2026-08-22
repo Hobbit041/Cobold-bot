@@ -17,3 +17,9 @@ def build_poll_keyboard(options: list[tuple[int, str, dt.date | None, int]]) -> 
         builder.button(text=label, callback_data=f"vote:{option_id}")
     builder.adjust(1)
     return builder.as_markup()
+
+
+def build_delete_keyboard(requester_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Удалить", callback_data=f"checkme_delete:{requester_id}")
+    return builder.as_markup()
