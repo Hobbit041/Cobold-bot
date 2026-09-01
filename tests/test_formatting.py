@@ -4,6 +4,7 @@ from bot.formatting import (
     build_message_link,
     checkme_empty_text,
     checkme_header,
+    cleared_service_messages_text,
     format_option_line,
     mygames_empty_text,
     mygames_header,
@@ -183,3 +184,13 @@ def test_mygames_header_escapes():
 
 def test_mygames_empty_text_escapes():
     assert mygames_empty_text("Alice & Bob") == "Alice &amp; Bob, у вас нет прошедших игр."
+
+
+def test_cleared_service_messages_text_with_nothing_deleted():
+    assert cleared_service_messages_text(0) == "Нечего удалять."
+
+
+def test_cleared_service_messages_text_pluralizes_count():
+    cases = {1: "Удалено 1 сообщение.", 2: "Удалено 2 сообщения.", 5: "Удалено 5 сообщений.", 11: "Удалено 11 сообщений.", 21: "Удалено 21 сообщение."}
+    for count, expected in cases.items():
+        assert cleared_service_messages_text(count) == expected, f"count={count}"

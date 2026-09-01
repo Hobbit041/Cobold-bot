@@ -78,3 +78,18 @@ class Reminder(Base):
     sent: Mapped[bool] = mapped_column(default=False)
 
     option: Mapped["Option"] = relationship(back_populates="reminder")
+
+
+class ServiceMessage(Base):
+    """A Telegram service notice (join/leave, pinned-message notice, etc.)
+    recorded as it happens so /clear can delete it later -- see
+    bot.handlers.service_messages for why this can only track messages from
+    the point this table started being written to, not chat history.
+    """
+
+    __tablename__ = "service_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int]
+    message_thread_id: Mapped[int | None] = mapped_column(default=None)
+    message_id: Mapped[int]

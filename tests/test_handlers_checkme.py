@@ -26,6 +26,7 @@ class FakeMessage:
         self.chat = FakeChat()
         self.message_thread_id = None
         self.answer = AsyncMock()
+        self.delete = AsyncMock()
 
 
 class FakeResolvedChat:
@@ -146,6 +147,15 @@ async def test_handle_checkme_skips_row_when_no_link_possible(session_maker):
     message.answer.assert_awaited_once_with(
         "@alice, у вас нет записей на игры.", parse_mode="HTML", reply_markup=DELETE_KEYBOARD
     )
+
+
+async def test_handle_checkme_deletes_triggering_command_message(session_maker):
+    fake_bot = AsyncMock()
+    message = FakeMessage(FakeUser(id=1, username=None, first_name="Alice"))
+
+    await handle_checkme(message, bot=fake_bot, session_maker=session_maker, timezone=TZ)
+
+    message.delete.assert_awaited_once()
 
 
 async def test_handle_checkme_with_no_votes_sends_empty_text(session_maker):

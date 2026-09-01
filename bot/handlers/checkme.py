@@ -66,6 +66,11 @@ async def handle_checkme(message: Message, bot: Bot, session_maker, timezone: Zo
     if user is None:
         return
 
+    try:
+        await message.delete()
+    except Exception:
+        logger.exception("Failed to delete /checkme command message %s", message.message_id)
+
     today = dt.datetime.now(timezone).date()
     async with session_maker() as session:
         rows = await repo.get_votes_by_user(session, user.id, on_or_after=today)

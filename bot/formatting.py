@@ -136,3 +136,17 @@ def mygames_header(mention: str) -> str:
 
 def mygames_empty_text(mention: str) -> str:
     return f"{html.escape(mention)}, у вас нет прошедших игр."
+
+
+def _pluralize_messages(count: int) -> str:
+    if count % 10 == 1 and count % 100 != 11:
+        return "сообщение"
+    if count % 10 in (2, 3, 4) and count % 100 not in (12, 13, 14):
+        return "сообщения"
+    return "сообщений"
+
+
+def cleared_service_messages_text(deleted_count: int) -> str:
+    if deleted_count == 0:
+        return "Нечего удалять."
+    return f"Удалено {deleted_count} {_pluralize_messages(deleted_count)}."

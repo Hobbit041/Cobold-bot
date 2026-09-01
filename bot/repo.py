@@ -11,7 +11,7 @@ import datetime as dt
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.models import Option, Poll, Reminder, ThresholdState, Vote
+from bot.models import Option, Poll, Reminder, ServiceMessage, ThresholdState, Vote
 
 # --- Poll creation / retrieval -------------------------------------------------
 
@@ -277,3 +277,39 @@ async def get_options_due_for_reminder(session: AsyncSession, target_date: dt.da
         )
     )
     return list(result.scalars().all())
+
+
+# --- Service message tracking (for /clear) ----------------------------------
+
+
+async def record_service_message(
+    session: AsyncSession, chat_id: int, message_thread_id: int | None, message_id: int
+) -> None:
+    session.add(
+        ServiceMessage(chat_id=chat_id, message_thread_id=message_thread_id, message_id=message_id)
+    )
+    await session.commit()
+
+
+async def pop_service_messages(
+    session: AsyncSession, chat_id: int, message_thread_id: int | None
+) -> list[int]:
+    """Return and forget the tracked service-message ids for one (chat, thread).
+
+    Rows are deleted here rather than left for a separate cleanup call, so a
+    message is only ever handed out once even if the caller's later Telegram
+    deletion fails for some of them (mirrors /deletepoll not getting stuck on
+    a message that's already gone).
+    """
+    result = await session.execute(
+        select(ServiceMessage).where(
+            ServiceMessage.chat_id == chat_id,
+            ServiceMessage.message_thread_id == message_thread_id,
+        )
+    )
+    rows = list(result.scalars().all())
+    message_ids = [row.message_id for row in rows]
+    for row in rows:
+        await session.delete(row)
+    await session.commit()
+    return message_ids
