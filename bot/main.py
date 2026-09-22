@@ -52,6 +52,7 @@ from bot.handlers import (
     admin_edit,
     checkme,
     dialog_control,
+    games,
     service_messages,
     stats,
     voting,
@@ -96,6 +97,7 @@ async def main() -> None:
     dp.include_router(admin_delete.router)
     dp.include_router(voting.router)
     dp.include_router(checkme.router)
+    dp.include_router(games.router)
     dp.include_router(stats.router)
 
     scheduler = create_scheduler(config.jobs_db_path, config.timezone)

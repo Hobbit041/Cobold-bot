@@ -138,6 +138,21 @@ def mygames_empty_text(mention: str) -> str:
     return f"{html.escape(mention)}, у вас нет прошедших игр."
 
 
+def games_header() -> str:
+    return "Собравшиеся игры:"
+
+
+def games_empty_text() -> str:
+    return "Пока нет собравшихся игр (нужно 4+ игрока на вариант с датой)."
+
+
+def games_not_available_in_dm_text() -> str:
+    return (
+        "В личных сообщениях эта команда доступна только администраторам чатов "
+        "с опросами — и покажет игры только из тех чатов, где вы администратор."
+    )
+
+
 def _pluralize_messages(count: int) -> str:
     if count % 10 == 1 and count % 100 != 11:
         return "сообщение"

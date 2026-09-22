@@ -148,6 +148,26 @@ async def get_voters(session: AsyncSession, option_id: int) -> list[Vote]:
     return list(result.scalars().all())
 
 
+async def get_dated_options_for_chats(
+    session: AsyncSession, chat_ids: list[int]
+) -> list[tuple[Poll, Option]]:
+    """Every non-deleted, dated option across the given chats, earliest first.
+
+    Used by /games: unlike get_votes_by_user, this isn't scoped to one voter --
+    vote counts are fetched separately (get_vote_count) so the caller can filter
+    down to options that actually "gathered" (reached the player threshold).
+    """
+    if not chat_ids:
+        return []
+    result = await session.execute(
+        select(Poll, Option)
+        .join(Option, Option.poll_id == Poll.id)
+        .where(Poll.chat_id.in_(chat_ids), Option.is_deleted.is_(False), Option.date.isnot(None))
+        .order_by(Option.date, Poll.chat_id, Option.position)
+    )
+    return list(result.all())
+
+
 async def get_votes_by_user(
     session: AsyncSession,
     user_id: int,

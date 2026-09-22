@@ -16,7 +16,9 @@ logger = logging.getLogger(__name__)
 router = Router(name="checkme")
 
 
-async def _build_lines(
+# Shared with bot.handlers.games, which lists a chat's (or, in DM for an
+# admin, several chats') gathered games rather than one user's votes.
+async def build_dated_option_lines(
     bot: Bot, rows: list[tuple[repo.Poll, repo.Option]], vote_counts: dict[int, int]
 ) -> list[str]:
     chat_cache: dict[int, object | None] = {}
@@ -77,7 +79,7 @@ async def handle_checkme(message: Message, bot: Bot, session_maker, timezone: Zo
         vote_counts = {option.id: await repo.get_vote_count(session, option.id) for _, option in rows}
 
     mention = formatting.voter_mention(user.username, user.first_name)
-    lines = await _build_lines(bot, rows, vote_counts)
+    lines = await build_dated_option_lines(bot, rows, vote_counts)
     await _answer_with_lines(
         message, lines, formatting.checkme_header(mention), formatting.checkme_empty_text(mention), user.id
     )
@@ -97,7 +99,7 @@ async def handle_mygames(message: Message, bot: Bot, session_maker, timezone: Zo
         vote_counts = {option.id: await repo.get_vote_count(session, option.id) for _, option in rows}
 
     mention = formatting.voter_mention(user.username, user.first_name)
-    lines = await _build_lines(bot, rows, vote_counts)
+    lines = await build_dated_option_lines(bot, rows, vote_counts)
     await _answer_with_lines(
         message, lines, formatting.mygames_header(mention), formatting.mygames_empty_text(mention), user.id
     )
