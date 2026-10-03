@@ -1,16 +1,22 @@
 from unittest.mock import AsyncMock
 
 from aiogram.enums import ContentType
+from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot import repo
+from bot.formatting import TOO_OLD_TO_DELETE
 from bot.handlers.service_messages import (
     TRACKED_CONTENT_TYPES,
     handle_clear,
     track_service_message,
 )
+
+
+def _bad_request(message: str) -> TelegramBadRequest:
+    return TelegramBadRequest(method=None, message=f"Bad Request: {message}")
 
 
 class FakeChat:
@@ -62,13 +68,20 @@ def test_tracked_content_types_covers_join_leave_and_pin_but_not_payments():
     assert ContentType.TEXT not in TRACKED_CONTENT_TYPES
 
 
+def test_tracked_content_types_excludes_what_telegram_never_deletes():
+    """deleteMessage documents these three as undeletable at any age."""
+    assert ContentType.SUPERGROUP_CHAT_CREATED not in TRACKED_CONTENT_TYPES
+    assert ContentType.CHANNEL_CHAT_CREATED not in TRACKED_CONTENT_TYPES
+    assert ContentType.FORUM_TOPIC_CREATED not in TRACKED_CONTENT_TYPES
+
+
 async def test_track_service_message_records_it(session_maker):
     message = FakeMessage(chat_id=-500, message_thread_id=7, message_id=42)
 
     await track_service_message(message, session_maker=session_maker)
 
     async with session_maker() as session:
-        message_ids = await repo.pop_service_messages(session, chat_id=-500, message_thread_id=7)
+        message_ids = await repo.get_service_messages(session, chat_id=-500, message_thread_id=7)
     assert message_ids == [42]
 
 
@@ -140,8 +153,8 @@ async def test_handle_clear_deletes_tracked_messages_for_its_own_chat_and_thread
     message.delete.assert_awaited_once()
 
     async with session_maker() as session:
-        remaining_thread_9 = await repo.pop_service_messages(session, chat_id=-500, message_thread_id=9)
-        remaining_other_chat = await repo.pop_service_messages(session, chat_id=-999, message_thread_id=None)
+        remaining_thread_9 = await repo.get_service_messages(session, chat_id=-500, message_thread_id=9)
+        remaining_other_chat = await repo.get_service_messages(session, chat_id=-999, message_thread_id=None)
     assert remaining_thread_9 == [999]
     assert remaining_other_chat == [888]
 
@@ -162,19 +175,83 @@ async def test_handle_clear_scopes_to_the_topic_it_was_run_in(session_maker):
     message.answer.assert_awaited_once_with("Удалено 1 сообщение.")
 
     async with session_maker() as session:
-        remaining_general = await repo.pop_service_messages(session, chat_id=-500, message_thread_id=None)
+        remaining_general = await repo.get_service_messages(session, chat_id=-500, message_thread_id=None)
     assert remaining_general == [202]
 
 
-async def test_handle_clear_still_reports_success_when_a_message_is_already_gone(session_maker):
+async def test_handle_clear_says_nothing_to_clear_when_a_message_was_already_gone(session_maker):
+    """An admin who already tidied up by hand shouldn't be told the bot failed."""
     async with session_maker() as session:
         await repo.record_service_message(session, chat_id=-500, message_thread_id=None, message_id=101)
 
     message = FakeMessage(chat_id=-500, message_thread_id=None)
     state = _state()
     fake_bot = _admin_bot()
-    fake_bot.delete_message.side_effect = Exception("message to delete not found")
+    fake_bot.delete_message.side_effect = _bad_request("message to delete not found")
 
     await handle_clear(message, state, bot=fake_bot, session_maker=session_maker)
 
     message.answer.assert_awaited_once_with("Нечего удалять.")
+
+    async with session_maker() as session:
+        assert await repo.get_service_messages(session, chat_id=-500, message_thread_id=None) == []
+
+
+async def test_handle_clear_reports_messages_telegram_refuses_as_too_old(session_maker):
+    async with session_maker() as session:
+        await repo.record_service_message(session, chat_id=-500, message_thread_id=None, message_id=101)
+        await repo.record_service_message(session, chat_id=-500, message_thread_id=None, message_id=102)
+
+    message = FakeMessage(chat_id=-500, message_thread_id=None)
+    state = _state()
+    fake_bot = _admin_bot()
+    fake_bot.delete_message.side_effect = _bad_request("message can't be deleted for everyone")
+
+    await handle_clear(message, state, bot=fake_bot, session_maker=session_maker)
+
+    message.answer.assert_awaited_once_with(
+        "Не удалось удалить 2 сообщения. " + TOO_OLD_TO_DELETE
+    )
+    # Nothing left to retry: Telegram will keep refusing these.
+    async with session_maker() as session:
+        assert await repo.get_service_messages(session, chat_id=-500, message_thread_id=None) == []
+
+
+async def test_handle_clear_reports_deleted_and_too_old_together(session_maker):
+    async with session_maker() as session:
+        await repo.record_service_message(session, chat_id=-500, message_thread_id=None, message_id=101)
+        await repo.record_service_message(session, chat_id=-500, message_thread_id=None, message_id=102)
+
+    message = FakeMessage(chat_id=-500, message_thread_id=None)
+    state = _state()
+    fake_bot = _admin_bot()
+
+    async def _delete(chat_id, message_id):
+        if message_id == 102:
+            raise _bad_request("message can't be deleted for everyone")
+
+    fake_bot.delete_message.side_effect = _delete
+
+    await handle_clear(message, state, bot=fake_bot, session_maker=session_maker)
+
+    message.answer.assert_awaited_once_with(
+        "Удалено 1 сообщение. Ещё 1 сообщение удалить не удалось: " + TOO_OLD_TO_DELETE
+    )
+
+
+async def test_handle_clear_keeps_tracking_a_message_that_failed_transiently(session_maker):
+    """A network blip must not cost the bot a notice it could still delete."""
+    async with session_maker() as session:
+        await repo.record_service_message(session, chat_id=-500, message_thread_id=None, message_id=101)
+
+    message = FakeMessage(chat_id=-500, message_thread_id=None)
+    state = _state()
+    fake_bot = _admin_bot()
+    fake_bot.delete_message.side_effect = TelegramNetworkError(method=None, message="timed out")
+
+    await handle_clear(message, state, bot=fake_bot, session_maker=session_maker)
+
+    message.answer.assert_awaited_once_with("Нечего удалять.")
+
+    async with session_maker() as session:
+        assert await repo.get_service_messages(session, chat_id=-500, message_thread_id=None) == [101]

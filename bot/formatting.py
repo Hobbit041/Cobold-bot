@@ -171,7 +171,31 @@ def _pluralize_messages(count: int) -> str:
     return "сообщений"
 
 
-def cleared_service_messages_text(deleted_count: int) -> str:
-    if deleted_count == 0:
+# Telegram's deleteMessage refuses anything older than this, whatever rights the
+# bot has in the chat, so /clear and /deletepoll can both hit it.
+TOO_OLD_TO_DELETE = "Telegram не даёт ботам удалять сообщения старше 48 часов."
+
+
+def cleared_service_messages_text(deleted_count: int, undeletable_count: int = 0) -> str:
+    """Report of one /clear run.
+
+    `undeletable_count` is the notices Telegram refused for good -- naming them
+    keeps a run where everything was too old from reading exactly like a run
+    where there was genuinely nothing to clear.
+    """
+    if deleted_count == 0 and undeletable_count == 0:
         return "Нечего удалять."
-    return f"Удалено {deleted_count} {_pluralize_messages(deleted_count)}."
+
+    if deleted_count == 0:
+        return (
+            f"Не удалось удалить {undeletable_count} "
+            f"{_pluralize_messages(undeletable_count)}. {TOO_OLD_TO_DELETE}"
+        )
+
+    deleted = f"Удалено {deleted_count} {_pluralize_messages(deleted_count)}."
+    if undeletable_count == 0:
+        return deleted
+    return (
+        f"{deleted} Ещё {undeletable_count} {_pluralize_messages(undeletable_count)} "
+        f"удалить не удалось: {TOO_OLD_TO_DELETE}"
+    )

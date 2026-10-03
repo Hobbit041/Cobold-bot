@@ -7,6 +7,11 @@ Telegram's Bot API gives bots no way to list or fetch a chat's past messages
 can only ever clean up service messages recorded from the moment this router
 starts running; anything from before is unreachable.
 
+The other half of that: deleteMessage refuses anything sent more than 48 hours
+ago, no matter what rights the bot has in the chat. Recording a notice is
+therefore no guarantee /clear can still delete it, and handle_clear below
+reports those refusals rather than quietly counting them as nothing to do.
+
 Must be included in the Dispatcher before admin_create/admin_edit/admin_copy/
 admin_delete's routers, for the same reason dialog_control is (see its module
 docstring): if an admin mid-dialog triggers a tracked service message in the
@@ -21,6 +26,7 @@ import logging
 
 from aiogram import Bot, F, Router
 from aiogram.enums import ContentType
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
@@ -40,6 +46,10 @@ _PRIVATE_CHAT_MESSAGE = "Эта команда работает только в 
 # Deliberately excludes anything with content a group might want kept:
 # payments/gifts/giveaways/passport data, and migrate_to/from_chat_id (the
 # chat's own id changes when that happens, which is worth leaving visible).
+#
+# Also excludes the three notices deleteMessage documents as never deletable --
+# supergroup, channel and forum-topic creation. Tracking those would only ever
+# produce rows /clear is guaranteed to fail on, and so report as undeletable.
 TRACKED_CONTENT_TYPES = {
     ContentType.NEW_CHAT_MEMBERS,
     ContentType.LEFT_CHAT_MEMBER,
@@ -49,15 +59,12 @@ TRACKED_CONTENT_TYPES = {
     ContentType.NEW_CHAT_PHOTO,
     ContentType.DELETE_CHAT_PHOTO,
     ContentType.GROUP_CHAT_CREATED,
-    ContentType.SUPERGROUP_CHAT_CREATED,
-    ContentType.CHANNEL_CHAT_CREATED,
     ContentType.MESSAGE_AUTO_DELETE_TIMER_CHANGED,
     ContentType.PINNED_MESSAGE,
     ContentType.WRITE_ACCESS_ALLOWED,
     ContentType.PROXIMITY_ALERT_TRIGGERED,
     ContentType.BOOST_ADDED,
     ContentType.CHAT_BACKGROUND_SET,
-    ContentType.FORUM_TOPIC_CREATED,
     ContentType.FORUM_TOPIC_EDITED,
     ContentType.FORUM_TOPIC_CLOSED,
     ContentType.FORUM_TOPIC_REOPENED,
@@ -92,19 +99,46 @@ async def handle_clear(
         return
 
     async with session_maker() as session:
-        message_ids = await repo.pop_service_messages(
+        message_ids = await repo.get_service_messages(
             session, message.chat.id, message.message_thread_id
         )
 
     deleted_count = 0
+    undeletable_count = 0
+    settled: list[int] = []
+
     for message_id in message_ids:
         try:
             await bot.delete_message(chat_id=message.chat.id, message_id=message_id)
-            deleted_count += 1
+        except TelegramBadRequest as error:
+            # Telegram refused and will keep refusing: the notice is past
+            # deleteMessage's 48-hour window, or someone removed it by hand
+            # already. Either way stop tracking it -- but only report the ones
+            # that are still sitting in the chat, so an admin who tidied up
+            # manually isn't told the bot failed at something.
+            settled.append(message_id)
+            if "not found" not in str(error).lower():
+                undeletable_count += 1
+            logger.warning(
+                "Telegram refused to delete service message %s in chat %s: %s",
+                message_id,
+                message.chat.id,
+                error,
+            )
         except Exception:
+            # Transient (network blip, 5xx, flood wait): leave the row alone so
+            # the next /clear tries this one again.
             logger.exception(
                 "Failed to delete service message %s in chat %s", message_id, message.chat.id
             )
+        else:
+            deleted_count += 1
+            settled.append(message_id)
 
-    text = formatting.cleared_service_messages_text(deleted_count)
+    async with session_maker() as session:
+        await repo.forget_service_messages(
+            session, message.chat.id, message.message_thread_id, settled
+        )
+
+    text = formatting.cleared_service_messages_text(deleted_count, undeletable_count)
     await cleanup_and_finish(message, state, text, scheduler=scheduler)

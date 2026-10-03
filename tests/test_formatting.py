@@ -1,6 +1,7 @@
 import datetime as dt
 
 from bot.formatting import (
+    TOO_OLD_TO_DELETE,
     build_message_link,
     checkme_empty_text,
     checkme_header,
@@ -207,3 +208,16 @@ def test_cleared_service_messages_text_pluralizes_count():
     cases = {1: "Удалено 1 сообщение.", 2: "Удалено 2 сообщения.", 5: "Удалено 5 сообщений.", 11: "Удалено 11 сообщений.", 21: "Удалено 21 сообщение."}
     for count, expected in cases.items():
         assert cleared_service_messages_text(count) == expected, f"count={count}"
+
+
+def test_cleared_service_messages_text_when_everything_was_too_old():
+    """Must not read like "Нечего удалять." -- there was something, it's just unreachable."""
+    assert cleared_service_messages_text(0, 3) == (
+        "Не удалось удалить 3 сообщения. " + TOO_OLD_TO_DELETE
+    )
+
+
+def test_cleared_service_messages_text_mixes_deleted_and_too_old():
+    assert cleared_service_messages_text(2, 1) == (
+        "Удалено 2 сообщения. Ещё 1 сообщение удалить не удалось: " + TOO_OLD_TO_DELETE
+    )

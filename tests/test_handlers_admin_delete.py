@@ -2,13 +2,19 @@ import datetime as dt
 from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
+from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot import repo
+from bot.formatting import TOO_OLD_TO_DELETE
 from bot.handlers.admin_delete import DeletePollStates, select_poll_to_delete, start_delete_poll
 from bot.scheduler import create_scheduler, message_deletion_job_id
+
+
+def _bad_request(message: str) -> TelegramBadRequest:
+    return TelegramBadRequest(method=None, message=f"Bad Request: {message}")
 
 
 class FakeChat:
@@ -193,7 +199,7 @@ async def test_select_poll_to_delete_still_cleans_db_when_message_already_gone(s
     await state.update_data(poll_ids=[poll_id])
 
     fake_bot = AsyncMock()
-    fake_bot.delete_message.side_effect = Exception("message to delete not found")
+    fake_bot.delete_message.side_effect = _bad_request("message to delete not found")
     message = FakeMessage("1")
 
     await select_poll_to_delete(message, state, bot=fake_bot, session_maker=session_maker)
@@ -201,6 +207,52 @@ async def test_select_poll_to_delete_still_cleans_db_when_message_already_gone(s
     message.answer.assert_awaited_once_with("Опрос удалён.")
     async with session_maker() as session:
         assert await repo.get_poll(session, poll_id) is None
+
+
+async def _delete_poll_with_failing_message_delete(session_maker, error):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=100, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+        poll_id = poll.id
+
+    state = _state()
+    await state.set_state(DeletePollStates.waiting_poll_selection)
+    await state.update_data(poll_ids=[poll_id])
+
+    fake_bot = AsyncMock()
+    fake_bot.delete_message.side_effect = error
+    message = FakeMessage("1")
+
+    await select_poll_to_delete(message, state, bot=fake_bot, session_maker=session_maker)
+
+    async with session_maker() as session:
+        assert await repo.get_poll(session, poll_id) is None
+    return message
+
+
+async def test_select_poll_to_delete_says_so_when_the_message_is_too_old_to_delete(session_maker):
+    """The DB row still goes, but don't claim the chat message went with it."""
+    message = await _delete_poll_with_failing_message_delete(
+        session_maker, _bad_request("message can't be deleted for everyone")
+    )
+
+    message.answer.assert_awaited_once_with(
+        "Опрос удалён из бота, но его сообщение осталось в чате: "
+        f"{TOO_OLD_TO_DELETE} Удалите его вручную."
+    )
+
+
+async def test_select_poll_to_delete_says_so_when_deleting_the_message_fails(session_maker):
+    message = await _delete_poll_with_failing_message_delete(
+        session_maker, TelegramNetworkError(method=None, message="timed out")
+    )
+
+    message.answer.assert_awaited_once_with(
+        "Опрос удалён из бота, но убрать его сообщение из чата не получилось — "
+        "удалите его вручную."
+    )
 
 
 async def test_select_poll_to_delete_in_group_cleans_prompt_and_schedules_confirmation(

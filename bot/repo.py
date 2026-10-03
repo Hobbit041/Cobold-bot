@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models import Option, Poll, Reminder, ServiceMessage, ThresholdState, Vote
@@ -301,6 +301,9 @@ async def get_options_due_for_reminder(session: AsyncSession, target_date: dt.da
 
 # --- Service message tracking (for /clear) ----------------------------------
 
+# Well under the 999-bound-parameter ceiling of even an old SQLite build.
+_SQLITE_PARAM_CHUNK = 500
+
 
 async def record_service_message(
     session: AsyncSession, chat_id: int, message_thread_id: int | None, message_id: int
@@ -311,25 +314,44 @@ async def record_service_message(
     await session.commit()
 
 
-async def pop_service_messages(
+async def get_service_messages(
     session: AsyncSession, chat_id: int, message_thread_id: int | None
 ) -> list[int]:
-    """Return and forget the tracked service-message ids for one (chat, thread).
-
-    Rows are deleted here rather than left for a separate cleanup call, so a
-    message is only ever handed out once even if the caller's later Telegram
-    deletion fails for some of them (mirrors /deletepoll not getting stuck on
-    a message that's already gone).
-    """
+    """The tracked service-message ids for one (chat, thread), oldest first."""
     result = await session.execute(
-        select(ServiceMessage).where(
+        select(ServiceMessage)
+        .where(
             ServiceMessage.chat_id == chat_id,
             ServiceMessage.message_thread_id == message_thread_id,
         )
+        .order_by(ServiceMessage.id)
     )
-    rows = list(result.scalars().all())
-    message_ids = [row.message_id for row in rows]
-    for row in rows:
-        await session.delete(row)
+    return [row.message_id for row in result.scalars().all()]
+
+
+async def forget_service_messages(
+    session: AsyncSession, chat_id: int, message_thread_id: int | None, message_ids: list[int]
+) -> None:
+    """Stop tracking the given ids -- they no longer need a /clear attempt.
+
+    Deliberately separate from get_service_messages, and called only with the
+    ids Telegram either deleted or refused for good (past deleteMessage's
+    48-hour window, already gone, a notice it never deletes): a transient API
+    failure then leaves its row in place for the next /clear, instead of the
+    bot forgetting a notice that is still perfectly deletable.
+    """
+    if not message_ids:
+        return
+
+    # Chunked because every id is a bound parameter and SQLite caps how many one
+    # statement may carry; a chat that went a long time between /clear runs can
+    # have accumulated more notices than that.
+    for start in range(0, len(message_ids), _SQLITE_PARAM_CHUNK):
+        await session.execute(
+            delete(ServiceMessage).where(
+                ServiceMessage.chat_id == chat_id,
+                ServiceMessage.message_thread_id == message_thread_id,
+                ServiceMessage.message_id.in_(message_ids[start : start + _SQLITE_PARAM_CHUNK]),
+            )
+        )
     await session.commit()
-    return message_ids

@@ -13,19 +13,29 @@ from __future__ import annotations
 import logging
 
 from aiogram import Bot, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 from sqlalchemy import select
 
-from bot import repo
+from bot import formatting, repo
 from bot.authz import filter_by_chat_admin
 from bot.handlers.dialog_cleanup import cleanup_and_answer, cleanup_and_finish
 from bot.models import Poll
 
 router = Router(name="admin_delete")
 logger = logging.getLogger(__name__)
+
+_POLL_MESSAGE_TOO_OLD = (
+    "Опрос удалён из бота, но его сообщение осталось в чате: "
+    f"{formatting.TOO_OLD_TO_DELETE} Удалите его вручную."
+)
+_POLL_MESSAGE_DELETE_FAILED = (
+    "Опрос удалён из бота, но убрать его сообщение из чата не получилось — "
+    "удалите его вручную."
+)
 
 
 class DeletePollStates(StatesGroup):
@@ -93,10 +103,27 @@ async def select_poll_to_delete(
         chat_id = poll.chat_id
         message_id = poll.message_id
 
+    # The DB record goes either way, including when the chat message survives:
+    # a poll the bot can no longer delete the message for must still be
+    # removable from the bot's own state, or it would clog the /editpoll,
+    # /copypoll and /deletepoll listings forever. But say so instead of
+    # reporting a clean "Опрос удалён." over a message still in the chat.
+    text = "Опрос удалён."
     if message_id is not None:
         try:
             await bot.delete_message(chat_id=chat_id, message_id=message_id)
+        except TelegramBadRequest as error:
+            if "not found" not in str(error).lower():
+                text = _POLL_MESSAGE_TOO_OLD
+            logger.warning(
+                "Telegram refused to delete message %s in chat %s for poll %s: %s",
+                message_id,
+                chat_id,
+                poll_id,
+                error,
+            )
         except Exception:
+            text = _POLL_MESSAGE_DELETE_FAILED
             logger.exception(
                 "Failed to delete message %s in chat %s for poll %s", message_id, chat_id, poll_id
             )
@@ -104,4 +131,4 @@ async def select_poll_to_delete(
     async with session_maker() as session:
         await repo.delete_poll(session, poll_id)
 
-    await cleanup_and_finish(message, state, "Опрос удалён.", scheduler=scheduler)
+    await cleanup_and_finish(message, state, text, scheduler=scheduler)
