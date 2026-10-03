@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 
-from bot import formatting, repo, threshold_logic
+from bot import formatting, links, repo, threshold_logic
 
 logger = logging.getLogger(__name__)
 
@@ -98,27 +98,6 @@ async def check_threshold(option_id: int) -> None:
         in_flight_jobs.discard(task)
 
 
-async def _poll_message_link(bot, chat_id: int, message_id: int | None) -> str | None:
-    """Link back to the poll message, for a reminder to point at.
-
-    Mirrors what /checkme and /games do: get_chat only to learn the chat's
-    @username, so a public chat gets the t.me/<username>/<id> form and a
-    private supergroup the t.me/c/<internal id>/<id> one. Neither a failed
-    lookup nor an unlinkable chat (a basic group, whose id has no /c/ form) is
-    fatal -- the reminder just goes out without a link.
-    """
-    if message_id is None:
-        return None
-
-    try:
-        username = (await bot.get_chat(chat_id)).username
-    except Exception:
-        logger.exception("Failed to look up chat %s for a reminder link", chat_id)
-        username = None
-
-    return formatting.build_message_link(chat_id, message_id, username)
-
-
 async def send_due_reminders() -> None:
     task = asyncio.current_task()
     in_flight_jobs.add(task)
@@ -149,7 +128,7 @@ async def send_due_reminders() -> None:
                 )
 
         for chat_id, message_thread_id, poll_message_id, option_id, option_date, mentions in to_send:
-            link = await _poll_message_link(bot, chat_id, poll_message_id)
+            link = await links.poll_message_link(bot, chat_id, poll_message_id)
             try:
                 await bot.send_message(
                     chat_id=chat_id,

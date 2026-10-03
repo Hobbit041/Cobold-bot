@@ -23,7 +23,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 from sqlalchemy import select
 
-from bot import date_utils, formatting, keyboards, repo
+from bot import date_utils, formatting, keyboards, links, repo
 from bot.authz import filter_by_chat_admin
 from bot.handlers.dialog_cleanup import cleanup_and_answer, cleanup_and_finish
 from bot.models import Poll
@@ -66,11 +66,19 @@ async def start_edit_poll(
         await cleanup_and_finish(message, state, "Активных опросов нет.", scheduler=scheduler)
         return
 
-    lines = [f"{i + 1}. {poll.title} (id={poll.id})" for i, poll in enumerate(polls)]
+    message_links = await links.poll_message_links(bot, polls)
+    lines = [
+        formatting.poll_choice_line(i + 1, poll.title, poll.id, message_links[poll.id])
+        for i, poll in enumerate(polls)
+    ]
     await state.update_data(poll_ids=[poll.id for poll in polls])
     await state.set_state(EditPollStates.waiting_poll_selection)
     await cleanup_and_answer(
-        message, state, "Выберите опрос по номеру:\n" + "\n".join(lines), scheduler=scheduler
+        message,
+        state,
+        "Выберите опрос по номеру:\n" + "\n".join(lines),
+        scheduler=scheduler,
+        parse_mode="HTML",
     )
 
 

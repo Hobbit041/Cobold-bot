@@ -20,7 +20,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 from sqlalchemy import select
 
-from bot import formatting, repo
+from bot import formatting, links, repo
 from bot.authz import filter_by_chat_admin
 from bot.handlers.dialog_cleanup import cleanup_and_answer, cleanup_and_finish
 from bot.models import Poll
@@ -63,9 +63,15 @@ async def start_delete_poll(
         await cleanup_and_finish(message, state, "Опросов нет.", scheduler=scheduler)
         return
 
+    message_links = await links.poll_message_links(bot, polls)
     lines = [
-        f"{i + 1}. {poll.title} (id={poll.id})"
-        + (" [опрос удалён, есть только в БД]" if poll.status == "orphaned" else "")
+        formatting.poll_choice_line(
+            i + 1,
+            poll.title,
+            poll.id,
+            message_links[poll.id],
+            orphaned=poll.status == "orphaned",
+        )
         for i, poll in enumerate(polls)
     ]
     await state.update_data(poll_ids=[poll.id for poll in polls])
@@ -75,6 +81,7 @@ async def start_delete_poll(
         state,
         "Какой опрос удалить? Выберите по номеру:\n" + "\n".join(lines),
         scheduler=scheduler,
+        parse_mode="HTML",
     )
 
 

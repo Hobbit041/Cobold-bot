@@ -132,6 +132,26 @@ def record_line(
     )
 
 
+ORPHANED_POLL_NOTE = " [опрос удалён, есть только в БД]"
+
+
+def poll_choice_line(
+    index: int, title: str, poll_id: int, link: str | None = None, orphaned: bool = False
+) -> str:
+    """One line of /editpoll's or /deletepoll's "pick a poll by number" list.
+
+    The title links to the poll's own message where there is one to link to
+    (same t.me forms as /games and /checkme), so an admin can see which poll a
+    number actually refers to before answering with it. Titles are untrusted
+    user input, hence the escaping -- callers send these with parse_mode="HTML".
+    """
+    label = html.escape(title)
+    if link:
+        label = f'<a href="{html.escape(link)}">{label}</a>'
+    note = ORPHANED_POLL_NOTE if orphaned else ""
+    return f"{index}. {label} (id={poll_id}){note}"
+
+
 def checkme_header(mention: str) -> str:
     return f"{html.escape(mention)}, вы записаны:"
 

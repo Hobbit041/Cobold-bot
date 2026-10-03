@@ -54,9 +54,17 @@ class FakeChatMember:
         self.status = status
 
 
-def _admin_bot():
+class FakeResolvedChat:
+    def __init__(self, username=None):
+        self.username = username
+
+
+def _admin_bot(chat_username=None):
     bot = AsyncMock()
     bot.get_chat_member.return_value = FakeChatMember(status="administrator")
+    # Without this, get_chat returns an AsyncMock whose .username is a truthy
+    # Mock, and the poll listing builds links out of its repr.
+    bot.get_chat.return_value = FakeResolvedChat(username=chat_username)
     return bot
 
 
@@ -783,3 +791,73 @@ async def test_revoll_rejects_unicode_digit_like_order_and_stays_in_state(tmp_pa
     async with session_maker() as session:
         options = await repo.get_poll_options(session, poll.id)
         assert [o.text for o in options] == ["A", "B"]
+
+
+async def test_start_edit_poll_links_each_poll_to_its_message(session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=-1001234567890, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+        poll_id = poll.id
+
+    message = FakeMessage("/editpoll")
+    state = _state()
+
+    await start_edit_poll(message, state, bot=_admin_bot(), session_maker=session_maker)
+
+    message.answer.assert_awaited_once_with(
+        "Выберите опрос по номеру:\n"
+        f'1. <a href="https://t.me/c/1234567890/42">Игра</a> (id={poll_id})',
+        parse_mode="HTML",
+    )
+
+
+async def test_start_edit_poll_uses_chat_username_when_public(session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=-1001234567890, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+
+    message = FakeMessage("/editpoll")
+    state = _state()
+
+    await start_edit_poll(
+        message, state, bot=_admin_bot(chat_username="companya"), session_maker=session_maker
+    )
+
+    assert 'href="https://t.me/companya/42"' in message.answer.await_args.args[0]
+
+
+async def test_start_edit_poll_lists_a_poll_with_no_message_as_plain_text(session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=-1001234567890, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+        poll_id = poll.id
+
+    message = FakeMessage("/editpoll")
+    state = _state()
+
+    await start_edit_poll(message, state, bot=_admin_bot(), session_maker=session_maker)
+
+    message.answer.assert_awaited_once_with(
+        f"Выберите опрос по номеру:\n1. Игра (id={poll_id})", parse_mode="HTML"
+    )
+
+
+async def test_start_edit_poll_escapes_a_poll_title(session_maker):
+    """Titles are whatever an admin typed, and the listing is HTML now."""
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=-1001234567890, title="Кофе & <Игры>", options=[("24.07", None)]
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+
+    message = FakeMessage("/editpoll")
+    state = _state()
+
+    await start_edit_poll(message, state, bot=_admin_bot(), session_maker=session_maker)
+
+    assert "Кофе &amp; &lt;Игры&gt;" in message.answer.await_args.args[0]

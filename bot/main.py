@@ -83,9 +83,10 @@ async def main() -> None:
     # and pass poll titles/option text/participant names through as the untrusted
     # user input they are -- a default parse mode would make Telegram reject any
     # message containing a bare "&"/"<"/">" (e.g. a poll titled "Coffee & Games",
-    # or a voter whose display name has one). The handful that do emit HTML (the
-    # /checkme, /games and reminder texts) escape every interpolated value and ask
-    # for parse_mode="HTML" on their own send call.
+    # or a voter whose display name has one). The ones that do emit HTML -- the
+    # /checkme and /games lists, the reminder, and /editpoll's and /deletepoll's
+    # poll pickers, i.e. everything that links to a message -- escape every
+    # interpolated value and ask for parse_mode="HTML" on their own send call.
     bot = Bot(token=config.bot_token)
     dp = Dispatcher(storage=MemoryStorage())  # in-process only; a restart mid-flow silently drops admin conversation state -- acceptable at this bot's scale
     # service_messages and dialog_control (/cancel) must be included before

@@ -48,9 +48,17 @@ def _state():
     return FSMContext(storage=storage, key=key)
 
 
-def _admin_bot():
+class FakeResolvedChat:
+    def __init__(self, username=None):
+        self.username = username
+
+
+def _admin_bot(chat_username=None):
     bot = AsyncMock()
     bot.get_chat_member.return_value = FakeChatMember(status="administrator")
+    # Without this, get_chat returns an AsyncMock whose .username is a truthy
+    # Mock, and the poll listing builds links out of its repr.
+    bot.get_chat.return_value = FakeResolvedChat(username=chat_username)
     return bot
 
 
@@ -298,3 +306,77 @@ async def test_select_poll_to_delete_when_poll_already_gone(session_maker):
     message.answer.assert_awaited_once_with("Опрос уже удалён.")
     fake_bot.delete_message.assert_not_awaited()
     assert await state.get_state() is None
+
+
+async def test_start_delete_poll_links_each_poll_to_its_message(session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=-1001234567890, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+        poll_id = poll.id
+
+    message = FakeMessage("/deletepoll")
+    state = _state()
+
+    await start_delete_poll(message, state, bot=_admin_bot(), session_maker=session_maker)
+
+    message.answer.assert_awaited_once_with(
+        "Какой опрос удалить? Выберите по номеру:\n"
+        f'1. <a href="https://t.me/c/1234567890/42">Игра</a> (id={poll_id})',
+        parse_mode="HTML",
+    )
+
+
+async def test_start_delete_poll_does_not_link_an_orphaned_poll(session_maker):
+    """Its message is already gone from the chat -- a link would lead nowhere."""
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=-1001234567890, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+        await repo.mark_poll_orphaned(session, poll.id)
+        poll_id = poll.id
+
+    message = FakeMessage("/deletepoll")
+    state = _state()
+
+    await start_delete_poll(message, state, bot=_admin_bot(), session_maker=session_maker)
+
+    message.answer.assert_awaited_once_with(
+        "Какой опрос удалить? Выберите по номеру:\n"
+        f"1. Игра (id={poll_id}) [опрос удалён, есть только в БД]",
+        parse_mode="HTML",
+    )
+
+
+async def test_start_delete_poll_lists_a_poll_with_no_message_as_plain_text(session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=-1001234567890, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+        poll_id = poll.id
+
+    message = FakeMessage("/deletepoll")
+    state = _state()
+
+    await start_delete_poll(message, state, bot=_admin_bot(), session_maker=session_maker)
+
+    message.answer.assert_awaited_once_with(
+        f"Какой опрос удалить? Выберите по номеру:\n1. Игра (id={poll_id})", parse_mode="HTML"
+    )
+
+
+async def test_start_delete_poll_escapes_a_poll_title(session_maker):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=-1001234567890, title="Кофе & <Игры>", options=[("24.07", None)]
+        )
+        await repo.set_poll_message(session, poll.id, message_id=42)
+
+    message = FakeMessage("/deletepoll")
+    state = _state()
+
+    await start_delete_poll(message, state, bot=_admin_bot(), session_maker=session_maker)
+
+    assert "Кофе &amp; &lt;Игры&gt;" in message.answer.await_args.args[0]

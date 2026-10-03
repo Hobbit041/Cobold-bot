@@ -12,6 +12,7 @@ from bot.formatting import (
     option_date_changed_notification,
     option_deleted_notification,
     option_text_changed_notification,
+    poll_choice_line,
     poll_message_text,
     record_line,
     reminder_text,
@@ -221,3 +222,22 @@ def test_cleared_service_messages_text_mixes_deleted_and_too_old():
     assert cleared_service_messages_text(2, 1) == (
         "Удалено 2 сообщения. Ещё 1 сообщение удалить не удалось: " + TOO_OLD_TO_DELETE
     )
+
+
+def test_poll_choice_line_links_the_title():
+    line = poll_choice_line(1, "Игра", 7, "https://t.me/c/1234567890/42")
+    assert line == '1. <a href="https://t.me/c/1234567890/42">Игра</a> (id=7)'
+
+
+def test_poll_choice_line_without_a_link_is_plain():
+    assert poll_choice_line(2, "Игра", 7) == "2. Игра (id=7)"
+
+
+def test_poll_choice_line_escapes_the_title():
+    line = poll_choice_line(1, "Кофе & <Игры>", 7, "https://t.me/c/1/2")
+    assert line == '1. <a href="https://t.me/c/1/2">Кофе &amp; &lt;Игры&gt;</a> (id=7)'
+
+
+def test_poll_choice_line_marks_an_orphaned_poll():
+    line = poll_choice_line(1, "Игра", 7, orphaned=True)
+    assert line == "1. Игра (id=7) [опрос удалён, есть только в БД]"
