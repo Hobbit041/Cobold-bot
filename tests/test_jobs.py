@@ -9,14 +9,28 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from bot import jobs, repo
 
 
+class FakeResolvedChat:
+    def __init__(self, username=None):
+        self.username = username
+
+
 class FakeBot:
-    def __init__(self, id=1):
+    def __init__(self, id=1, username=None, get_chat_error=None):
         self.id = id
+        self.username = username
+        self.get_chat_error = get_chat_error
         self.sent_messages = []
+        self.parse_modes = []
         self.deleted_messages = []
 
-    async def send_message(self, chat_id, text, message_thread_id=None):
+    async def send_message(self, chat_id, text, message_thread_id=None, parse_mode=None):
         self.sent_messages.append((chat_id, text, message_thread_id))
+        self.parse_modes.append(parse_mode)
+
+    async def get_chat(self, chat_id):
+        if self.get_chat_error is not None:
+            raise self.get_chat_error
+        return FakeResolvedChat(username=self.username)
 
     async def delete_message(self, chat_id, message_id):
         self.deleted_messages.append((chat_id, message_id))
@@ -29,10 +43,13 @@ class FailingFakeBot:
         self.fail_for_chat_id = fail_for_chat_id
         self.sent_messages = []
 
-    async def send_message(self, chat_id, text, message_thread_id=None):
+    async def send_message(self, chat_id, text, message_thread_id=None, parse_mode=None):
         if chat_id == self.fail_for_chat_id:
             raise RuntimeError("simulated Telegram API failure")
         self.sent_messages.append((chat_id, text, message_thread_id))
+
+    async def get_chat(self, chat_id):
+        return FakeResolvedChat()
 
 
 async def test_threshold_check_callback_announces_when_still_at_threshold(session_maker):
@@ -140,6 +157,69 @@ async def test_daily_reminder_callback_uses_poll_message_thread_id(session_maker
     await jobs.send_due_reminders()
 
     assert fake_bot.sent_messages[0][2] == 42
+
+
+async def _due_poll_with_message(session_maker, tz, chat_id, message_id=None):
+    tomorrow = dt.datetime.now(tz).date() + dt.timedelta(days=1)
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=chat_id, title="Игра", options=[("Игра", tomorrow)]
+        )
+        if message_id is not None:
+            await repo.set_poll_message(session, poll.id, message_id=message_id)
+        option = (await repo.get_poll_options(session, poll.id))[0]
+        await repo.toggle_vote(session, option.id, user_id=1, username="alice", first_name="Alice")
+        await repo.set_announced(session, option.id, True)
+    return option
+
+
+async def test_daily_reminder_links_to_the_poll_message(session_maker):
+    tz = ZoneInfo("Europe/Moscow")
+    await _due_poll_with_message(session_maker, tz, chat_id=-1001234567890, message_id=42)
+
+    fake_bot = FakeBot()
+    jobs.configure(fake_bot, session_maker, admin_mention="@admin", timezone=tz)
+    await jobs.send_due_reminders()
+
+    assert '<a href="https://t.me/c/1234567890/42">игра</a>' in fake_bot.sent_messages[0][1]
+    assert fake_bot.parse_modes == ["HTML"]
+
+
+async def test_daily_reminder_link_uses_chat_username_when_public(session_maker):
+    tz = ZoneInfo("Europe/Moscow")
+    await _due_poll_with_message(session_maker, tz, chat_id=-1001234567890, message_id=42)
+
+    fake_bot = FakeBot(username="companya")
+    jobs.configure(fake_bot, session_maker, admin_mention="@admin", timezone=tz)
+    await jobs.send_due_reminders()
+
+    assert '<a href="https://t.me/companya/42">игра</a>' in fake_bot.sent_messages[0][1]
+
+
+async def test_daily_reminder_sends_without_link_when_poll_message_unknown(session_maker):
+    tz = ZoneInfo("Europe/Moscow")
+    option = await _due_poll_with_message(session_maker, tz, chat_id=-1001234567890)
+
+    fake_bot = FakeBot()
+    jobs.configure(fake_bot, session_maker, admin_mention="@admin", timezone=tz)
+    await jobs.send_due_reminders()
+
+    assert "<a href=" not in fake_bot.sent_messages[0][1]
+    assert "состоится игра!" in fake_bot.sent_messages[0][1]
+    async with session_maker() as session:
+        assert await repo.is_reminder_sent(session, option.id) is True
+
+
+async def test_daily_reminder_still_links_when_get_chat_fails(session_maker):
+    """A get_chat failure must not cost the reminder its link, let alone the send."""
+    tz = ZoneInfo("Europe/Moscow")
+    await _due_poll_with_message(session_maker, tz, chat_id=-1001234567890, message_id=42)
+
+    fake_bot = FakeBot(get_chat_error=RuntimeError("bot was removed from chat"))
+    jobs.configure(fake_bot, session_maker, admin_mention="@admin", timezone=tz)
+    await jobs.send_due_reminders()
+
+    assert '<a href="https://t.me/c/1234567890/42">игра</a>' in fake_bot.sent_messages[0][1]
 
 
 async def test_daily_reminder_callback_skips_not_announced(session_maker):

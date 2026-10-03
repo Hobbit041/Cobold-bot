@@ -143,6 +143,19 @@ def test_reminder_text_lists_participants():
     )
 
 
+def test_reminder_text_links_to_poll_message():
+    text = reminder_text(dt.date(2026, 7, 25), ["@alice"], "https://t.me/c/1234567890/42")
+    assert text == (
+        'Напоминаю, что завтра, 25 июля, состоится <a href="https://t.me/c/1234567890/42">игра</a>! '
+        "Пожалуйста, подтвердите участие реакцией на это сообщение:\n@alice"
+    )
+
+
+def test_reminder_text_escapes_participant_names():
+    text = reminder_text(dt.date(2026, 7, 25), ["Bob <3 & Co"])
+    assert text.endswith("Bob &lt;3 &amp; Co")
+
+
 def test_build_message_link_with_username():
     assert build_message_link(-1001234567890, 42, "somechat") == "https://t.me/somechat/42"
 

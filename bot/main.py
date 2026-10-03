@@ -79,11 +79,13 @@ async def main() -> None:
     engine, session_maker = create_engine_and_sessionmaker(config.db_path)
     await init_db(engine)
 
-    # No parse_mode is set: no formatting function anywhere in this codebase emits
-    # HTML/Markdown, and poll titles/option text/participant names are untrusted
-    # user input passed straight through -- setting a parse mode without escaping
-    # that input would make Telegram reject messages containing plain "&"/"<"/">"
-    # (e.g. a poll titled "Coffee & Games", or a voter whose display name has one).
+    # No default parse_mode is set: most formatting functions here emit plain text
+    # and pass poll titles/option text/participant names through as the untrusted
+    # user input they are -- a default parse mode would make Telegram reject any
+    # message containing a bare "&"/"<"/">" (e.g. a poll titled "Coffee & Games",
+    # or a voter whose display name has one). The handful that do emit HTML (the
+    # /checkme, /games and reminder texts) escape every interpolated value and ask
+    # for parse_mode="HTML" on their own send call.
     bot = Bot(token=config.bot_token)
     dp = Dispatcher(storage=MemoryStorage())  # in-process only; a restart mid-flow silently drops admin conversation state -- acceptable at this bot's scale
     # service_messages and dialog_control (/cancel) must be included before

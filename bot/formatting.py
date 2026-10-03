@@ -86,10 +86,20 @@ def option_date_changed_notification(
     return f"{prefix}вы проголосовали за вариант, но он изменился! В опрос внесены изменения: {change}."
 
 
-def reminder_text(option_date: dt.date, participant_mentions: list[str]) -> str:
-    participants_block = "\n".join(participant_mentions)
+def reminder_text(
+    option_date: dt.date, participant_mentions: list[str], link: str | None = None
+) -> str:
+    """HTML-formatted reminder; `link` makes "игра" a link to the poll message.
+
+    Rendered as HTML (hence the escaping) whether or not a link is given, since
+    the caller sends it with one parse mode either way. `link` is None when the
+    poll's message has no addressable t.me form -- see build_message_link -- and
+    the sentence then reads exactly as it did before links were added.
+    """
+    participants_block = "\n".join(html.escape(mention) for mention in participant_mentions)
+    game = f'<a href="{html.escape(link)}">игра</a>' if link else "игра"
     return (
-        f"Напоминаю, что завтра, {format_date_ru(option_date)}, состоится игра! "
+        f"Напоминаю, что завтра, {format_date_ru(option_date)}, состоится {game}! "
         f"Пожалуйста, подтвердите участие реакцией на это сообщение:\n{participants_block}"
     )
 
