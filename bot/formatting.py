@@ -31,9 +31,24 @@ def poll_message_text(title: str, option_lines: list[str]) -> str:
     return f"📅 {title}\n\n{body}"
 
 
-def threshold_reached_text(admin_mention: str, option_text: str, option_date: dt.date | None) -> str:
+def threshold_reached_text(
+    admin_mention: str, option_text: str, option_date: dt.date | None, link: str | None = None
+) -> str:
+    """HTML-formatted announcement; `link` makes the option's name a link to the poll message.
+
+    Rendered as HTML (hence the escaping) whether or not a link is given, since
+    the caller sends it with one parse mode either way. `link` is None when the
+    poll's message has no addressable t.me form -- see build_message_link -- and
+    the sentence then reads exactly as it did before links were added.
+    """
     label = f"{option_text} {format_date_ru(option_date)}" if option_date is not None else option_text
-    return f'{admin_mention}, за вариант "{label}" достаточно голосов для брони!'
+    label = html.escape(label)
+    if link:
+        label = f'<a href="{html.escape(link)}">{label}</a>'
+    return (
+        f'{html.escape(admin_mention)}, за вариант "{label}" '
+        f"достаточно голосов для брони!"
+    )
 
 
 def threshold_dropped_text(option_text: str, option_date: dt.date | None) -> str:

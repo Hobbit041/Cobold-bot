@@ -112,6 +112,69 @@ async def test_threshold_check_callback_uses_poll_message_thread_id(session_make
     assert fake_bot.sent_messages[0][2] == 42
 
 
+async def _poll_at_threshold(session_maker, chat_id, message_id=None):
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=chat_id, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+        if message_id is not None:
+            await repo.set_poll_message(session, poll.id, message_id=message_id)
+        option = (await repo.get_poll_options(session, poll.id))[0]
+        for user_id in range(4):
+            await repo.toggle_vote(
+                session, option.id, user_id=user_id, username=f"user{user_id}", first_name=f"User{user_id}"
+            )
+    return option
+
+
+async def test_threshold_announcement_links_to_the_poll_message(session_maker):
+    option = await _poll_at_threshold(session_maker, chat_id=-1001234567890, message_id=42)
+
+    fake_bot = FakeBot()
+    jobs.configure(fake_bot, session_maker, admin_mention="@admin", timezone=ZoneInfo("Europe/Moscow"))
+    await jobs.check_threshold(option.id)
+
+    assert (
+        '<a href="https://t.me/c/1234567890/42">24.07 24 июля</a>'
+        in fake_bot.sent_messages[0][1]
+    )
+    assert fake_bot.parse_modes == ["HTML"]
+
+
+async def test_threshold_announcement_link_uses_chat_username_when_public(session_maker):
+    option = await _poll_at_threshold(session_maker, chat_id=-1001234567890, message_id=42)
+
+    fake_bot = FakeBot(username="companya")
+    jobs.configure(fake_bot, session_maker, admin_mention="@admin", timezone=ZoneInfo("Europe/Moscow"))
+    await jobs.check_threshold(option.id)
+
+    assert '<a href="https://t.me/companya/42">' in fake_bot.sent_messages[0][1]
+
+
+async def test_threshold_announcement_sends_without_link_when_poll_message_unknown(session_maker):
+    option = await _poll_at_threshold(session_maker, chat_id=-1001234567890)
+
+    fake_bot = FakeBot()
+    jobs.configure(fake_bot, session_maker, admin_mention="@admin", timezone=ZoneInfo("Europe/Moscow"))
+    await jobs.check_threshold(option.id)
+
+    assert "<a href=" not in fake_bot.sent_messages[0][1]
+    assert 'за вариант "24.07 24 июля"' in fake_bot.sent_messages[0][1]
+    async with session_maker() as session:
+        assert await repo.is_announced(session, option.id) is True
+
+
+async def test_threshold_announcement_still_links_when_get_chat_fails(session_maker):
+    """A get_chat failure must not cost the announcement its link, let alone the send."""
+    option = await _poll_at_threshold(session_maker, chat_id=-1001234567890, message_id=42)
+
+    fake_bot = FakeBot(get_chat_error=RuntimeError("bot was removed from chat"))
+    jobs.configure(fake_bot, session_maker, admin_mention="@admin", timezone=ZoneInfo("Europe/Moscow"))
+    await jobs.check_threshold(option.id)
+
+    assert '<a href="https://t.me/c/1234567890/42">' in fake_bot.sent_messages[0][1]
+
+
 async def test_daily_reminder_callback_sends_and_marks_sent(session_maker):
     tz = ZoneInfo("Europe/Moscow")
     tomorrow = dt.datetime.now(tz).date() + dt.timedelta(days=1)

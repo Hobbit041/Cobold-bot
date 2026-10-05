@@ -72,6 +72,24 @@ def test_threshold_reached_text_without_date():
     assert text == '@admin, за вариант "Во что поиграть" достаточно голосов для брони!'
 
 
+def test_threshold_reached_text_links_the_option_to_the_poll_message():
+    text = threshold_reached_text(
+        "@admin", "24.07", dt.date(2026, 7, 24), "https://t.me/c/1234567890/42"
+    )
+    assert text == (
+        '@admin, за вариант "<a href="https://t.me/c/1234567890/42">24.07 24 июля</a>" '
+        "достаточно голосов для брони!"
+    )
+
+
+def test_threshold_reached_text_escapes_the_option_text():
+    text = threshold_reached_text("@admin", "<b>Doom</b> & Duke", None, "https://t.me/c/1/2")
+    assert text == (
+        '@admin, за вариант "<a href="https://t.me/c/1/2">'
+        '&lt;b&gt;Doom&lt;/b&gt; &amp; Duke</a>" достаточно голосов для брони!'
+    )
+
+
 def test_threshold_dropped_text_without_date():
     text = threshold_dropped_text("Во что поиграть", None)
     assert text == (
