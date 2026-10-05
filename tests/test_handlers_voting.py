@@ -27,6 +27,22 @@ class FakeCallback:
         self.answer = AsyncMock()
 
 
+class FakeResolvedChat:
+    def __init__(self, username=None):
+        self.username = username
+
+
+def _bot(username=None):
+    """AsyncMock bot whose get_chat answers like Telegram's.
+
+    Only the drop-message path calls get_chat (to pick the t.me link form),
+    so the tests that don't reach it stay on a bare AsyncMock.
+    """
+    bot = AsyncMock()
+    bot.get_chat.return_value = FakeResolvedChat(username=username)
+    return bot
+
+
 async def _noop_threshold_callback(option_id):
     pass
 
@@ -107,7 +123,7 @@ async def test_handle_vote_toggle_dropping_below_threshold_sends_drop_message(tm
         await repo.set_announced(session, option.id, True)
 
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
-    fake_bot = AsyncMock()
+    fake_bot = _bot()
     callback = FakeCallback(data=f"vote:{option.id}", user=FakeUser(id=0, username="u0", first_name="U0"))
 
     await handle_vote_toggle(
@@ -124,6 +140,7 @@ async def test_handle_vote_toggle_dropping_below_threshold_sends_drop_message(tm
         chat_id=100,
         text='За вариант "24.07 24 июля" снова меньше 4х человек. Проголосуйте, а то игра отменится!',
         message_thread_id=None,
+        parse_mode="HTML",
     )
     async with session_maker() as session:
         assert await repo.is_announced(session, option.id) is False
@@ -369,6 +386,64 @@ async def test_handle_vote_toggle_does_not_reschedule_timer_on_extra_votes_past_
     assert second_run_time == first_run_time
 
 
+async def _poll_about_to_drop(session_maker, chat_id, message_id=None):
+    """A poll whose only option has 4 votes and has already been announced:
+    the next vote taken away sends the drop message."""
+    async with session_maker() as session:
+        poll = await repo.create_poll(
+            session, chat_id=chat_id, title="Игра", options=[("24.07", dt.date(2026, 7, 24))]
+        )
+        if message_id is not None:
+            await repo.set_poll_message(session, poll.id, message_id=message_id)
+        option = (await repo.get_poll_options(session, poll.id))[0]
+        for user_id in range(4):
+            await repo.toggle_vote(
+                session, option.id, user_id=user_id, username=f"u{user_id}", first_name=f"U{user_id}"
+            )
+        await repo.set_announced(session, option.id, True)
+    return option
+
+
+async def _drop_one_vote(session_maker, tmp_path, option, fake_bot):
+    scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
+    callback = FakeCallback(data=f"vote:{option.id}", user=FakeUser(id=0, username="u0", first_name="U0"))
+    await handle_vote_toggle(
+        callback,
+        session_maker=session_maker,
+        scheduler=scheduler,
+        bot=fake_bot,
+        admin_mention="@admin",
+        threshold_check_callback=_noop_threshold_callback,
+        threshold_debounce_seconds=900,
+    )
+    return fake_bot.send_message.await_args.kwargs["text"]
+
+
+async def test_drop_message_links_to_the_poll_message(tmp_path, session_maker):
+    option = await _poll_about_to_drop(session_maker, chat_id=-1001234567890, message_id=42)
+
+    text = await _drop_one_vote(session_maker, tmp_path, option, _bot())
+
+    assert '<a href="https://t.me/c/1234567890/42">24.07 24 июля</a>' in text
+
+
+async def test_drop_message_link_uses_chat_username_when_public(tmp_path, session_maker):
+    option = await _poll_about_to_drop(session_maker, chat_id=-1001234567890, message_id=42)
+
+    text = await _drop_one_vote(session_maker, tmp_path, option, _bot(username="companya"))
+
+    assert '<a href="https://t.me/companya/42">' in text
+
+
+async def test_drop_message_sends_without_link_when_poll_message_unknown(tmp_path, session_maker):
+    option = await _poll_about_to_drop(session_maker, chat_id=-1001234567890)
+
+    text = await _drop_one_vote(session_maker, tmp_path, option, _bot())
+
+    assert "<a href=" not in text
+    assert 'За вариант "24.07 24 июля"' in text
+
+
 async def test_handle_vote_toggle_drop_message_uses_poll_message_thread_id(tmp_path, session_maker):
     async with session_maker() as session:
         poll = await repo.create_poll(
@@ -387,7 +462,7 @@ async def test_handle_vote_toggle_drop_message_uses_poll_message_thread_id(tmp_p
         await repo.set_announced(session, option.id, True)
 
     scheduler = create_scheduler(str(tmp_path / "jobs.sqlite3"), ZoneInfo("Europe/Moscow"))
-    fake_bot = AsyncMock()
+    fake_bot = _bot()
     callback = FakeCallback(data=f"vote:{option.id}", user=FakeUser(id=0, username="u0", first_name="U0"))
 
     await handle_vote_toggle(

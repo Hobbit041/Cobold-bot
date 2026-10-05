@@ -31,6 +31,22 @@ def poll_message_text(title: str, option_lines: list[str]) -> str:
     return f"📅 {title}\n\n{body}"
 
 
+def _threshold_option_label(
+    option_text: str, option_date: dt.date | None, link: str | None
+) -> str:
+    """The option's name as the two threshold messages below render it.
+
+    HTML-escaped, and a link to the poll message where there is one to link
+    to (same t.me forms as /games and /checkme), so whoever reads the
+    announcement in a busy chat can jump straight to the poll it is about.
+    """
+    label = f"{option_text} {format_date_ru(option_date)}" if option_date is not None else option_text
+    label = html.escape(label)
+    if link:
+        label = f'<a href="{html.escape(link)}">{label}</a>'
+    return label
+
+
 def threshold_reached_text(
     admin_mention: str, option_text: str, option_date: dt.date | None, link: str | None = None
 ) -> str:
@@ -41,18 +57,22 @@ def threshold_reached_text(
     poll's message has no addressable t.me form -- see build_message_link -- and
     the sentence then reads exactly as it did before links were added.
     """
-    label = f"{option_text} {format_date_ru(option_date)}" if option_date is not None else option_text
-    label = html.escape(label)
-    if link:
-        label = f'<a href="{html.escape(link)}">{label}</a>'
+    label = _threshold_option_label(option_text, option_date, link)
     return (
         f'{html.escape(admin_mention)}, за вариант "{label}" '
         f"достаточно голосов для брони!"
     )
 
 
-def threshold_dropped_text(option_text: str, option_date: dt.date | None) -> str:
-    label = f"{option_text} {format_date_ru(option_date)}" if option_date is not None else option_text
+def threshold_dropped_text(
+    option_text: str, option_date: dt.date | None, link: str | None = None
+) -> str:
+    """HTML-formatted warning, the mirror of threshold_reached_text above.
+
+    Same deal: HTML whether or not there is a link, and the sentence reads
+    exactly as it did before links were added when `link` is None.
+    """
+    label = _threshold_option_label(option_text, option_date, link)
     return (
         f'За вариант "{label}" снова меньше 4х человек. '
         f"Проголосуйте, а то игра отменится!"

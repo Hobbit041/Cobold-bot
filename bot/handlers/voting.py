@@ -7,7 +7,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
 from sqlalchemy.exc import IntegrityError
 
-from bot import formatting, keyboards, repo, threshold_logic
+from bot import formatting, keyboards, links, repo, threshold_logic
 from bot.scheduler import cancel_threshold_check, schedule_threshold_check, threshold_job_id
 
 logger = logging.getLogger(__name__)
@@ -103,10 +103,12 @@ async def handle_vote_toggle(
         async with session_maker() as session:
             await repo.set_announced(session, option_id, False)
         try:
+            link = await links.poll_message_link(bot, poll.chat_id, poll.message_id)
             await bot.send_message(
                 chat_id=poll.chat_id,
-                text=formatting.threshold_dropped_text(option_text, option_date),
+                text=formatting.threshold_dropped_text(option_text, option_date, link),
                 message_thread_id=poll.message_thread_id,
+                parse_mode="HTML",
             )
         except Exception:
             logger.exception("Failed to send threshold-drop message for option %s", option_id)

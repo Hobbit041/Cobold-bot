@@ -97,6 +97,23 @@ def test_threshold_dropped_text_without_date():
     )
 
 
+def test_threshold_dropped_text_links_the_option_to_the_poll_message():
+    text = threshold_dropped_text("24.07", dt.date(2026, 7, 24), "https://t.me/c/1234567890/42")
+    assert text == (
+        'За вариант "<a href="https://t.me/c/1234567890/42">24.07 24 июля</a>" '
+        "снова меньше 4х человек. Проголосуйте, а то игра отменится!"
+    )
+
+
+def test_threshold_dropped_text_escapes_the_option_text():
+    text = threshold_dropped_text("<b>Doom</b> & Duke", None, "https://t.me/c/1/2")
+    assert text == (
+        'За вариант "<a href="https://t.me/c/1/2">'
+        '&lt;b&gt;Doom&lt;/b&gt; &amp; Duke</a>" снова меньше 4х человек. '
+        "Проголосуйте, а то игра отменится!"
+    )
+
+
 def test_option_deleted_notification_lists_voters():
     text = option_deleted_notification("24.07", dt.date(2026, 7, 24), ["@alice", "Bob"])
     assert text == (
